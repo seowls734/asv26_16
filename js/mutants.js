@@ -13,8 +13,49 @@
     dog:  { w: 64, h: 42, speed: 220, hp: 60, dmg: 14, knockX: 620, knockY: -380, flying: false },
     crow: { w: 44, h: 30, speed: 260, hp: 25, dmg: 10, knockX: 340, knockY: -260, flying: true },
     // 보스 '녹슨 거수' — 개(64×42)의 약 5배 덩치. hp 는 스폰 시 참가자 수로 다시 계산
-    boss: { w: 236, h: 164, speed: 120, hp: 850, dmg: 8, knockX: 520, knockY: -300, flying: false, boss: true }
+    behemoth: { w: 236, h: 164, speed: 120, hp: 850, dmg: 8, knockX: 520, knockY: -300, flying: false, boss: true },
+    // 보스 '이끼 여왕' — 거대한 이끼 나방. 몸통(가슴+늘어진 배) 판정, 날개는 그림만
+    mossqueen: { w: 150, h: 178, speed: 150, hp: 800, dmg: 8, knockX: 460, knockY: -320, flying: true, boss: true },
+    // 보스 '강철 지네' — 판정은 머리+앞 몸통, 뒤따르는 마디는 접촉 피해만
+    centipede: { w: 180, h: 92, speed: 170, hp: 850, dmg: 8, knockX: 480, knockY: -300, flying: false, boss: true },
+    // 강철 지네가 격노 시 떼어 내는 마디 드론 (지면 몬스터)
+    drone: { w: 38, h: 26, speed: 330, hp: 26, dmg: 7, knockX: 300, knockY: -220, flying: false }
   };
+  var BOSS_ORDER = ['behemoth', 'mossqueen', 'centipede'];
+  var BOSS_NAMES = { behemoth: '녹슨 거수', mossqueen: '이끼 여왕', centipede: '강철 지네' };
+  var BOSS_SUBJ = { behemoth: '녹슨 거수가', mossqueen: '이끼 여왕이', centipede: '강철 지네가' };
+
+  // ---------------------------------------------------------------- 보스 3 '강철 지네' 수치
+  var CENTI = {
+    hpMul: 1.0, segs: 15, segGap: 27,
+    walk: 170, walkEnr: 235, cool: 1.3, enrMul: 0.7,
+    contactDmg: 8, bodyDmg: 6, bodyCd: 0.9,
+    burrowWind: 0.8, digSpd: 560, digMax: 1.6, eruptWind: 0.75, eruptDmg: 22, eruptW: 250, eruptH: 230, eruptVy: -1050,
+    railWind: 0.9, railSpd: 1150, railSpdEnr: 1350, railT: 1.3, railDmg: 20, railKx: 900, railKy: -520,
+    slagLife: 1.8, slagDmg: 4, slagTick: 0.5,
+    sprayWind: 0.7, scraps: 6, scrapsEnr: 9, scrapDmg: 11, scrapT: 0.85, scrapR: 11, moltenLife: 1.6, moltenW: 70, moltenDmg: 4,
+    whipWind: 0.75, whipDmg: 16, whipR: 340, whipH: 64,
+    drones: 3, droneCd: 14, droneWind: 0.9, enrageTime: 1.3, introT: 2.2
+  };
+
+  // ---------------------------------------------------------------- 보스 2 '이끼 여왕' 수치
+  var QUEEN = {
+    hpMul: 0.92,            // 녹슨 거수 hp 대비 (공중이라 맞히기 조금 어려움)
+    hoverY: 16,             // 평소 몸통 바닥 = 땅 - 16 (늘어진 배가 땅을 스침 → 지상 기술로 타격 가능)
+    hoverHi: 150,           // 광선 시 몸통 바닥 높이
+    fly: 150, flyEnr: 210, keepOff: 230,
+    cool: 1.4, enrMul: 0.7,
+    contactDmg: 8, contactCd: 1.0,
+    diveWind: 0.9, diveT: 1.05, diveDmg: 20, diveKx: 820, diveKy: -520, diveZone: 260, diveRise: 230,
+    sporeWind: 0.8, spores: 4, sporesEnr: 6, sporeDmg: 10, sporeFall: 0.95,
+    cloudR: 92, cloudLife: 2.6, cloudDmg: 6, cloudTick: 0.5,
+    beamWind: 1.1, beamT: 1.5, beamTEnr: 1.15, beamDmg: 14, beamSpan: 1100, beamH: 90, beamW: 46,
+    summonWind: 1.0, crows: 2, crowsEnr: 3, summonCd: 15,
+    gustWind: 0.85, darts: 7, dartDmg: 9, dartSpd: 980, gustRange: 620, gustKx: 980, gustDmg: 6,
+    enrageTime: 1.3, introT: 2.2
+  };
+  // 보스전 모드
+  var RUSH = { first: 5, gap: 8, hpStep: 0.3 };
 
   // ---------------------------------------------------------------- 보스 수치
   var BOSS = {
@@ -59,6 +100,15 @@
   var bossLandX = 0;
   var bossFx = [];                // 모든 클라이언트: 충격파/독침/웅덩이/표식/잔해 (로컬 시뮬레이션)
   var warnT = 0;                  // 모든 클라이언트: 경고 연출 남은 시간
+  var warnType = 'behemoth';      // 모든 클라이언트: 경고 중인 보스 종류
+  var nextBossIdx = 0;            // 권한측: 다음 보스 (BOSS_ORDER 순환)
+  var bossMode = false;           // 보스전 모드 (일반 돌연변이 없음)
+  var bossesKilled = 0;
+  var lastDeadPts = null;         // 강철 지네 사망 시 마디 위치 (시체 연출)
+  var bossWarnNum = 0;            // 보스전: 몇 번째 보스인지 (경고 문구)
+  // 발판 봉쇄
+  var lockedPrev = false, lockAnim = 0, lockSince = 0;
+  var toastQ = [], lastToastAt = -10;
 
   function net() { return Game.Net || null; }
 
@@ -106,7 +156,16 @@
     if (typeof Game.spawnParticles === 'function') Game.spawnParticles(x, y, n, color, speed);
   }
   function shake(a) { if (typeof Game.shake === 'function') Game.shake(a); }
-  function toast(t) { if (typeof Game.toast === 'function') Game.toast(t); }
+  function toast(t) { lastToastAt = clock; if (typeof Game.toast === 'function') Game.toast(t); }
+  // 보스 알림이 서로 덮어쓰지 않게 최소 간격을 두고 차례로 표시
+  function queueToast(t) {
+    if (!toastQ.length && clock - lastToastAt >= 1.5) toast(t);
+    else toastQ.push(t);
+  }
+  function pumpToasts() {
+    if (toastQ.length && clock - lastToastAt >= 1.5) toast(toastQ.shift());
+  }
+  function bossName(type) { return BOSS_NAMES[type] || BOSS_NAMES.behemoth; }
 
   // 경기 진행도 0..1 (약 3분에 최대 난이도)
   function difficulty() { return clamp(matchTime / 180, 0, 1); }
@@ -117,7 +176,9 @@
     var m = makeBase(type, id, x, y, T);
     if (T.boss) {
       m.boss = true;
-      m.name = BOSS.name;
+      m.name = bossName(type);
+      m.sweep = 0;           // 이끼 여왕: 광선 진행 0..1 등 보조값
+      m.ax0 = 0; m.ax1 = 0;  // 이끼 여왕: 광선 시작/끝 x
       m.enraged = false;
       m.cool = 1.0;          // 다음 패턴까지
       m.lastPat = null;
@@ -237,7 +298,7 @@
     m.y += m.vy * dt;
     m.onGround = false;
     var bottom = m.y + m.h;
-    if (m.vy >= 0 && m.dropTimer <= 0 && W.platforms) {
+    if (m.vy >= 0 && m.dropTimer <= 0 && W.platforms && !W.platformsLocked) {
       for (var i = 0; i < W.platforms.length; i++) {
         var p = W.platforms[i];
         if (!p) continue;
@@ -262,7 +323,7 @@
   function navigateVertical(m, tgt) {
     var tb = tgt.y + tgt.h, mb = m.y + m.h;
     var dx = Math.abs((tgt.x + tgt.w / 2) - (m.x + m.w / 2));
-    if (!m.onGround) return;
+    if (!m.onGround || world().platformsLocked) return;
     if (tb < mb - 60 && dx < 260) {
       m.vy = m.type === 'rat' ? -760 : -880;
       m.onGround = false;
@@ -495,7 +556,8 @@
         m.enraged = !!s.enr;
         m.stateDur = +s.sd || 0;
         m.aux = +s.aux || 0;
-        m.name = BOSS.name;
+        m.ax0 = +s.a0 || 0; m.ax1 = +s.a1 || 0;
+        m.name = bossName(m.type);
       }
       m.alive = true;
       next.push(m);
@@ -568,9 +630,11 @@
     if (!(m.stunT > 0) && !(m.rootT > 0)) return false;
     if (m.boss) {
       // 보스: 패턴은 유지한 채 잠시 멈춤 (공중 도약/낙하 중엔 무시)
-      if (m.state === 'leap' || m.state === 'intro') return false;
+      if (m.state === 'leap' || m.state === 'intro' || m.state === 'dive' || m.state === 'dig' || m.state === 'erupt_wind' || m.state === 'erupt' || m.state === 'rail') return false;
       m.vx *= Math.exp(-12 * dt);
-      bossPhysics(m, dt);
+      if (m.type === 'mossqueen') { m.vy *= Math.exp(-8 * dt); queenPhysics(m, dt); }
+      else if (m.type === 'centipede') centPhysics(m, dt);
+      else bossPhysics(m, dt);
       return true;
     }
     if (m.stunT > 0 && m.state !== 'hurt') setState(m, 'hurt', 0.1);
@@ -618,6 +682,7 @@
         s.enr = m.enraged ? 1 : 0;
         s.sd = Math.round(m.stateDur * 100) / 100;
         s.aux = Math.round(m.aux);
+        if (m.type === 'mossqueen') { s.a0 = Math.round(m.ax0); s.a1 = Math.round(m.ax1); }
       }
       out.push(s);
     }
@@ -652,7 +717,7 @@
     return null;
   }
   function gy() { return world().groundY; }
-  function bossMul(m) { return m.enraged ? BOSS.enrMul : 1; }
+  function bossMul(m) { return m.enraged ? (m.type === 'mossqueen' ? QUEEN.enrMul : (m.type === 'centipede' ? CENTI.enrMul : BOSS.enrMul)) : 1; }
   function bcx(m) { return m.x + m.w / 2; }
 
   function combatants() {
@@ -726,9 +791,81 @@
     var i;
     if (k === 'warn') {
       warnT = BOSS.warn;
-      bossFx.push({ kind: 'marker', x: +msg.x || 0, life: BOSS.warn + 1.4, t: 0 });
-      toast('⚠ 보스 출현! — ' + BOSS.name);
+      warnType = TYPES[msg.type] && TYPES[msg.type].boss ? msg.type : 'behemoth';
+      if (typeof msg.n === 'number') bossWarnNum = msg.n;
+      bossFx.push({ kind: 'marker', x: +msg.x || 0, life: BOSS.warn + 1.4, t: 0, type: warnType });
+      queueToast('⚠ 보스 출현! — ' + bossName(warnType));
       shake(8);
+    } else if (k === 'arrive') {
+      // 이끼 여왕 도착: 날갯짓 돌풍 + 포자 폭발 (피해 없음)
+      shake(18);
+      particles(msg.x, G0 - (+msg.dy || 120), 46, TOXIC, 420);
+      particles(msg.x, G0 - 20, 30, '#7fe0b8', 360);
+      particles(msg.x, G0 - 10, 26, '#c9b48a', 300);
+      bossFx.push({ kind: 'gustfx', x: +msg.x, y: G0 - (+msg.dy || 120), dir: 0, life: 1.1, t: 0 });
+      for (i = bossFx.length - 1; i >= 0; i--) if (bossFx[i].kind === 'marker') bossFx.splice(i, 1);
+    } else if (k === 'qdive') {
+      shake(14);
+      particles(msg.x, G0 - 12, 30, '#7fe0b8', 360);
+      particles(msg.x, G0 - 20, 18, TOXIC, 260);
+      bossFx.push({ kind: 'cloud', x: +msg.x, r: QUEEN.cloudR * 0.8, life: 1.4, t: 0, cd: {}, dmg: 0 });
+    } else if (k === 'spores') {
+      var sl = msg.list || [];
+      for (i = 0; i < sl.length; i++) {
+        bossFx.push({ kind: 'pod', x: +sl[i][0], sx: +sl[i][1], y0: G0 - (+sl[i][2]), delay: +sl[i][3] || 0,
+                      fall: QUEEN.sporeFall, t: 0, ft: 0, hit: {}, enr: !!msg.enr, spin: Math.random() * 6 });
+      }
+    } else if (k === 'beam') {
+      bossFx.push({ kind: 'beam', x0: +msg.x0, x1: +msg.x1, dur: +msg.dur || QUEEN.beamT, back: !!msg.back,
+                    sy: G0 - (+msg.dy || 260), t: 0, hit: {}, hit2: {}, enr: !!msg.enr, scorch: [] });
+    } else if (k === 'gust') {
+      var gx = +msg.x, gdy = G0 - (+msg.dy || 120);
+      shake(12);
+      bossFx.push({ kind: 'gustfx', x: gx, y: gdy, dir: 0, life: 0.9, t: 0 });
+      forVictims(function (p, key, isLocal) {
+        var pcx = p.x + p.w / 2;
+        if (Math.abs(pcx - gx) > QUEEN.gustRange || p.y + p.h < gdy - 160) return;
+        var d = pcx >= gx ? 1 : -1;
+        hurt(p, isLocal, QUEEN.gustDmg, d * QUEEN.gustKx, -360);
+      });
+      var dl = msg.list || [];
+      for (i = 0; i < dl.length; i++) {
+        bossFx.push({ kind: 'dart', x: +dl[i][0], y: G0 - (+dl[i][1]), vx: +dl[i][2], vy: +dl[i][3], t: 0, hit: {}, delay: +msg.delay || 0 });
+      }
+    } else if (k === 'dig') {
+      // 강철 지네가 땅속으로 파고듦
+      shake(10);
+      particles(msg.x, G0 - 6, 34, '#c9b48a', 340);
+      particles(msg.x, G0 - 10, 12, '#ff9a3a', 260);
+      bossFx.push({ kind: 'crack', x: +msg.x, w: 200, life: 1.6, t: 0 });
+    } else if (k === 'erupt') {
+      shake(msg.dmg ? 24 : 16);
+      particles(msg.x, G0 - 10, 46, '#c9b48a', 520);
+      particles(msg.x, G0 - 30, 26, '#ff9a3a', 420);
+      particles(msg.x, G0 - 20, 14, '#5a4a3a', 360);
+      bossFx.push({ kind: 'crack', x: +msg.x, w: (+msg.w || 250) * 1.4, life: 2.0, t: 0 });
+      if (+msg.dmg > 0) impactZone(msg.x - (+msg.w || 250) / 2, +msg.h || CENTI.eruptH, +msg.dmg, 600, -900, msg.x);
+      for (i = bossFx.length - 1; i >= 0; i--) if (bossFx[i].kind === 'marker') bossFx.splice(i, 1);
+    } else if (k === 'slag') {
+      var sx0 = Math.min(+msg.x0, +msg.x1), sx1 = Math.max(+msg.x0, +msg.x1);
+      if (sx1 - sx0 > 20) bossFx.push({ kind: 'slag', x0: sx0, x1: sx1, life: CENTI.slagLife, t: 0, cd: {} });
+    } else if (k === 'scrap') {
+      var cl = msg.list || [];
+      for (i = 0; i < cl.length; i++) {
+        bossFx.push({ kind: 'scrap', delay: +msg.delay || 0, x: +cl[i][0], y: G0 - (+cl[i][1]), vx: +cl[i][2], vy: +cl[i][3],
+                      ax: +cl[i][4], t: 0, hit: {}, rot: Math.random() * 6, enr: !!msg.enr });
+      }
+    } else if (k === 'whip') {
+      var wx = +msg.x, wr = +msg.r || CENTI.whipR, wh = +msg.h || CENTI.whipH;
+      shake(14);
+      bossFx.push({ kind: 'whipfx', x: wx, r: wr, dir: msg.dir === -1 ? -1 : 1, life: 0.55, t: 0 });
+      particles(wx, G0 - 20, 24, '#ffcf7a', 420);
+      var wz = { x: wx - wr, y: G0 - wh, w: wr * 2, h: wh };
+      forVictims(function (p, key, isLocal) {
+        if (!rectHit(wz, p)) return;
+        var d = (p.x + p.w / 2) >= wx ? 1 : -1;
+        hurt(p, isLocal, +msg.dmg || CENTI.whipDmg, d * 700, -560);
+      });
     } else if (k === 'land') {
       shake(26);
       particles(msg.x, G0 - 10, 40, '#c9b48a', 420);
@@ -757,23 +894,28 @@
       bossFx.push({ kind: 'roar', x: +msg.x, y: G0 - (+msg.dy || 150), dir: msg.dir === -1 ? -1 : 1, life: 1.1, t: 0 });
     } else if (k === 'enrage') {
       shake(18);
-      toast(BOSS.name + '이(가) 격노했다!');
+      queueToast((BOSS_SUBJ[msg.type] || BOSS_SUBJ.behemoth) + ' 격노했다!');
       bossFx.push({ kind: 'roar', x: +msg.x, y: G0 - (+msg.dy || 150), dir: msg.dir === -1 ? -1 : 1, life: 1.4, t: 0, red: true });
       particles(msg.x, G0 - 100, 40, '#ff5a2a', 360);
     } else if (k === 'die') {
       var bx = +msg.x, by = G0 - (+msg.dy || 80);
+      var deadPts = lastDeadPts; lastDeadPts = null;
       if (!local) {
-        for (i = Mutants.list.length - 1; i >= 0; i--) if (Mutants.list[i].boss) Mutants.list.splice(i, 1);
+        for (i = Mutants.list.length - 1; i >= 0; i--) if (Mutants.list[i].boss) { if (Mutants.list[i].segPts) deadPts = Mutants.list[i].segPts; Mutants.list.splice(i, 1); }
       }
-      bossFx.push({ kind: 'corpse', x: bx, facing: msg.facing === -1 ? -1 : 1, enr: !!msg.enr, life: 2.4, t: 0 });
+      var dtp = TYPES[msg.type] && TYPES[msg.type].boss ? msg.type : 'behemoth';
+      bossFx.push({ kind: 'corpse', type: dtp, pts: deadPts ? deadPts.map(function (q) { return { x: q.x, y: q.y, a: q.a }; }) : null, x: bx, y: by, facing: msg.facing === -1 ? -1 : 1, enr: !!msg.enr, life: 2.4, t: 0 });
       particles(bx, by, 60, TOXIC, 480);
-      particles(bx, by, 30, '#b5541c', 360);
+      particles(bx, by, 30, dtp === 'mossqueen' ? '#7fe0b8' : (dtp === 'centipede' ? '#ff9a3a' : '#b5541c'), 360);
       particles(bx, by, 24, '#3f8f2a', 300);
       shake(30);
       var nm = msg.name || '누군가';
-      toast(nm + ' 님이 보스를 처치했다!');
+      queueToast(nm + ' 님이 보스를 처치했다! — ' + bossName(dtp));
       if (!local && msg.killer != null && msg.killer === myNetId()) emitKill('boss', msg.src || null);
       warnT = 0;
+      if (typeof msg.count === 'number') bossesKilled = msg.count; else if (!local) bossesKilled++;
+      Mutants.bossesKilled = bossesKilled;
+      if (Game.events && Game.events.emit) Game.events.emit('bossDefeated', { type: dtp, count: bossesKilled, killer: msg.killer != null ? msg.killer : null });
     }
   }
 
@@ -789,23 +931,26 @@
   }
 
   // ---- 스폰 일정 (권한측)
+  function nextBossType() { return BOSS_ORDER[nextBossIdx % BOSS_ORDER.length]; }
+
   function bossSchedule(dt) {
     if (findBoss()) return;
     bossTimer -= dt;
     if (!bossWarned && bossTimer <= BOSS.warn) {
       bossWarned = true;
-      bossLandX = pickLandX();
-      bossEmit({ kind: 'warn', x: Math.round(bossLandX) });
+      var ty = nextBossType();
+      bossLandX = pickLandX(ty);
+      bossEmit({ kind: 'warn', x: Math.round(bossLandX), type: ty, n: bossesKilled + 1 });
     }
     if (bossTimer <= 0) {
-      spawnBoss(bossLandX, false);
+      spawnBoss(bossLandX, false, nextBossType());
     }
   }
 
-  function pickLandX() {
+  function pickLandX(type) {
     var W = world();
     var c = candidatePlayers();
-    var half = TYPES.boss.w / 2;
+    var half = (TYPES[type] || TYPES.behemoth).w / 2;
     var x = W.width / 2;
     if (c.length) {
       var s = 0;
@@ -815,25 +960,55 @@
     return clamp(x, half + 60, W.width - half - 60);
   }
 
-  function spawnBoss(x, instant) {
+  function bossHpFor(type) {
+    var hp = BOSS.hpBase + BOSS.hpPer * combatants();
+    if (type === 'mossqueen') hp *= QUEEN.hpMul;
+    if (type === 'centipede') hp *= CENTI.hpMul;
+    if (bossMode) hp *= 1 + RUSH.hpStep * bossesKilled;
+    return Math.round(hp / 10) * 10;
+  }
+
+  function spawnBoss(x, instant, type) {
     if (!isAuthority()) return null;
     var old = findBoss();
     if (old) return old;
+    if (!TYPES[type] || !TYPES[type].boss) type = nextBossType();
+    // 순환: 방금 나온 종류 다음 것을 다음 보스로
+    nextBossIdx = (BOSS_ORDER.indexOf(type) + 1) % BOSS_ORDER.length;
     var W = world();
-    var T = TYPES.boss;
-    if (x == null) x = pickLandX();
+    var T = TYPES[type];
+    if (x == null) x = pickLandX(type);
     if (instant) {
-      bossEmit({ kind: 'warn', x: Math.round(x) });
+      bossEmit({ kind: 'warn', x: Math.round(x), type: type, n: bossesKilled + 1 });
       warnT = 0;
     }
-    var m = makeMutant('boss', nextId++, clamp(x - T.w / 2, 0, W.width - T.w), W.groundY - T.h - 1050);
-    var hp = BOSS.hpBase + BOSS.hpPer * combatants();
+    var m;
+    if (type === 'centipede') {
+      m = makeMutant(type, nextId++, clamp(x - T.w / 2, 0, W.width - T.w), W.groundY + 40);
+      m.launched = false;
+      setBossState(m, 'intro', CENTI.introT);
+      m.facing = Math.random() < 0.5 ? -1 : 1;
+      m.hp = m.maxHp = m.lagHp = bossHpFor(type);
+      Mutants.list.push(m);
+      bossTimer = bossMode ? RUSH.gap : BOSS.respawn;
+      bossWarned = false;
+      return m;
+    }
+    if (type === 'mossqueen') {
+      m = makeMutant(type, nextId++, clamp(x - T.w / 2, 0, W.width - T.w), W.groundY - T.h - 900);
+      m.aux = W.groundY - T.h - QUEEN.hoverY;   // 도착 높이
+      m.introY = m.y;
+      setBossState(m, 'intro', QUEEN.introT);
+    } else {
+      m = makeMutant(type, nextId++, clamp(x - T.w / 2, 0, W.width - T.w), W.groundY - T.h - 1050);
+      m.vy = 200;
+      setBossState(m, 'intro', 3);
+    }
+    var hp = bossHpFor(type);
     m.hp = m.maxHp = m.lagHp = hp;
-    m.vy = 200;
     m.facing = Math.random() < 0.5 ? -1 : 1;
-    setBossState(m, 'intro', 3);
     Mutants.list.push(m);
-    bossTimer = BOSS.respawn;
+    bossTimer = bossMode ? RUSH.gap : BOSS.respawn;
     bossWarned = false;
     return m;
   }
@@ -890,6 +1065,8 @@
   }
 
   function mouthPos(m) {
+    if (m.type === 'mossqueen') return { x: bcx(m) + m.facing * 10, y: m.y + 34 };
+    if (m.type === 'centipede') { var hp0 = centHead(m); return { x: hp0.x + m.facing * 26, y: hp0.y - 4 }; }
     // 입 위치 (머리 앞쪽) — drawBoss 의 머리 위치와 대략 일치
     return { x: bcx(m) + m.facing * (m.w * 0.5 + 40), y: m.y + m.h * 0.42 };
   }
@@ -964,6 +1141,12 @@
 
   // ---- AI (권한측)
   function updateBoss(m, dt) {
+    if (m.type === 'mossqueen') updateQueen(m, dt);
+    else if (m.type === 'centipede') updateCenti(m, dt);
+    else updateBehemoth(m, dt);
+  }
+
+  function updateBehemoth(m, dt) {
     var mul = bossMul(m);
     var tgt = nearestTarget(m);
     m.target = tgt;
@@ -1100,6 +1283,282 @@
     bossPhysics(m, dt);
   }
 
+  // ================================================================ 보스 2 '이끼 여왕' AI (권한측)
+  // 거대한 이끼 나방. 땅 바로 위를 맴돌며(늘어진 배가 땅을 스침) 지상전 위주 패턴:
+  //  dive  : 표식 지점으로 U자 급강하 (몸통 접촉 20)   spores: 포자 폭탄 낙하 → 독 포자 구름
+  //  beam  : 높이 떠올라 땅을 훑는 독성 광선 (점프로 회피)  summon: 까마귀 소환
+  //  gust  : (격노 전용) 날개 돌풍으로 밀쳐내고 깃털 화살 부채꼴 발사
+  function queenPhysics(m, dt) {
+    var W = world();
+    m.x += m.vx * dt;
+    m.y += m.vy * dt;
+    m.onGround = false;
+    if (m.y + m.h > W.groundY - 4) { m.y = W.groundY - 4 - m.h; if (m.vy > 0) m.vy = 0; }
+    if (m.y < W.groundY - m.h - 700) m.y = W.groundY - m.h - 700;
+    m.hitWall = 0;
+    if (m.x < 0) { m.x = 0; m.hitWall = -1; if (m.vx < 0) m.vx = 0; }
+    if (m.x + m.w > W.width) { m.x = W.width - m.w; m.hitWall = 1; if (m.vx > 0) m.vx = 0; }
+  }
+
+  // 목표 높이(몸통 바닥이 땅에서 alt 만큼 위)로 부드럽게
+  function queenHoverTo(m, alt, dt, rate) {
+    var ty = gy() - m.h - alt + Math.sin(clock * 2.2 + m.seed * 6) * 7;
+    var want = (ty - m.y) * (rate || 4);
+    m.vy = approach(m.vy, clamp(want, -520, 520), 2400, dt);
+  }
+
+  function countType(t) {
+    var c = 0;
+    for (var i = 0; i < Mutants.list.length; i++) if (Mutants.list[i].alive && Mutants.list[i].type === t) c++;
+    return c;
+  }
+
+  function chooseQueenPattern(m, tgt) {
+    var dist = tgt ? Math.abs((tgt.x + tgt.w / 2) - bcx(m)) : 600;
+    var opts = [
+      ['dive', dist > 200 ? 2.6 : 1.4],
+      ['spores', 2.2],
+      ['beam', dist < 700 ? 2.0 : 1.2],
+      ['summon', (m.summonCd <= 0 && countType('crow') < 4 && aliveCount() < MAX_ALIVE + 2) ? 1.1 : 0]
+    ];
+    if (m.enraged) opts.push(['gust', dist < QUEEN.gustRange ? 2.6 : 1.0]);
+    var total = 0, i;
+    for (i = 0; i < opts.length; i++) {
+      if (opts[i][0] === m.lastPat) opts[i][1] *= 0.2;
+      total += opts[i][1];
+    }
+    var r = Math.random() * total;
+    for (i = 0; i < opts.length; i++) {
+      r -= opts[i][1];
+      if (r <= 0) return opts[i][0];
+    }
+    return 'dive';
+  }
+
+  function startQueenPattern(m, p, tgt) {
+    var mul = bossMul(m);
+    var W = world();
+    m.lastPat = p;
+    var tx = tgt ? tgt.x + tgt.w / 2 : bcx(m) + m.facing * 400;
+    m.facing = tx >= bcx(m) ? 1 : -1;
+    if (p === 'dive') {
+      m.aux = clamp(tx, 120, W.width - 120);
+      m.slam2 = false;
+      setBossState(m, 'dive_wind', QUEEN.diveWind * mul);
+    } else if (p === 'spores') {
+      var dur = QUEEN.sporeWind * mul;
+      setBossState(m, 'spore_wind', dur);
+      var n = m.enraged ? QUEEN.sporesEnr : QUEEN.spores;
+      var list = [];
+      var bx = bcx(m), byd = Math.round(gy() - (m.y + m.h * 0.75));
+      for (var i = 0; i < n; i++) {
+        // 목표 주변 + 여왕 앞쪽으로 고르게 퍼짐 (한 곳은 정확히 목표 발밑)
+        var off = i === 0 ? 0 : ((i % 2 ? 1 : -1) * Math.ceil(i / 2) * 170 + rand(-30, 30));
+        var x = clamp(tx + off, 40, W.width - 40);
+        list.push([Math.round(x), Math.round(bx + rand(-30, 30)), byd, Math.round((dur + i * 0.12) * 100) / 100]);
+      }
+      bossEmit({ kind: 'spores', list: list, enr: m.enraged ? 1 : 0 });
+    } else if (p === 'beam') {
+      var span = QUEEN.beamSpan;
+      // 여왕 쪽에서 목표를 지나 반대편까지 훑음
+      var a0 = clamp(tx - m.facing * span * 0.45, 30, W.width - 30);
+      var a1 = clamp(tx + m.facing * span * 0.55, 30, W.width - 30);
+      m.ax0 = a0; m.ax1 = a1;
+      setBossState(m, 'beam_wind', QUEEN.beamWind * mul);
+    } else if (p === 'summon') {
+      setBossState(m, 'summon', QUEEN.summonWind * mul);
+      m.summonCd = QUEEN.summonCd;
+      var mp = mouthPos(m);
+      bossEmit({ kind: 'roar', x: Math.round(mp.x), dy: Math.round(gy() - mp.y), dir: m.facing });
+    } else if (p === 'gust') {
+      setBossState(m, 'gust_wind', QUEEN.gustWind * mul);
+    }
+  }
+
+  function summonCrows(m) {
+    var n = m.enraged ? QUEEN.crowsEnr : QUEEN.crows;
+    var mp = mouthPos(m);
+    for (var i = 0; i < n; i++) {
+      if (aliveCount() >= MAX_ALIVE + 4) break;
+      var c = makeMutant('crow', nextId++, clamp(mp.x - 22 + (i - (n - 1) / 2) * 60, 0, world().width - 44), m.y - 40 - i * 20);
+      c.facing = m.facing;
+      c.vx = (i - (n - 1) / 2) * 260; c.vy = -220;
+      Mutants.list.push(c);
+      particles(c.x + 22, c.y + 15, 12, '#7fe0b8', 220);
+      send({ t: 'mutantFx', kind: 'spawn', id: c.id, x: Math.round(c.x + 22), y: Math.round(c.y + 15), gy: gy() });
+    }
+  }
+
+  function fireGust(m, tgt) {
+    var cx = bcx(m), cy = m.y + m.h * 0.45;
+    var G0 = gy();
+    var n = QUEEN.darts;
+    var list = [];
+    var aimX = tgt ? tgt.x + tgt.w / 2 : cx + m.facing * 400;
+    var base = Math.atan2(G0 - 30 - cy, aimX - cx);
+    for (var i = 0; i < n; i++) {
+      var a = base + (i - (n - 1) / 2) * 0.17;
+      list.push([Math.round(cx), Math.round(G0 - cy), Math.round(Math.cos(a) * QUEEN.dartSpd), Math.round(Math.sin(a) * QUEEN.dartSpd)]);
+    }
+    bossEmit({ kind: 'gust', x: Math.round(cx), dy: Math.round(G0 - cy), list: list, delay: 0.18 });
+  }
+
+  function updateQueen(m, dt) {
+    var mul = bossMul(m);
+    var W = world();
+    var tgt = nearestTarget(m);
+    m.target = tgt;
+    if (m.summonCd > 0) m.summonCd -= dt;
+    var dxT = tgt ? (tgt.x + tgt.w / 2) - bcx(m) : 0;
+    m.stateTimer -= dt;
+    var done = m.stateTimer <= 0;
+    var p = m.stateDur > 0 ? clamp(1 - m.stateTimer / m.stateDur, 0, 1) : 1;
+
+    switch (m.state) {
+      case 'intro':
+        // 하늘에서 날개를 접고 내려와 정지
+        var q = easeOut(p);
+        var ny = m.introY + (m.aux - m.introY) * q;
+        m.vy = (ny - m.y) / dt; m.y = ny; m.vx = 0;
+        if (done) {
+          m.vy = 0;
+          bossEmit({ kind: 'arrive', x: Math.round(bcx(m)), dy: Math.round(gy() - (m.y + m.h * 0.4)) });
+          setBossState(m, 'roar', BOSS.roarTime);
+          var mp0 = mouthPos(m);
+          bossEmit({ kind: 'roar', x: Math.round(mp0.x), dy: Math.round(gy() - mp0.y), dir: m.facing });
+        }
+        return;   // 위치 직접 계산 (물리 없음)
+
+      case 'roar':
+      case 'enrage':
+        m.vx = approach(m.vx, 0, 1200, dt);
+        queenHoverTo(m, QUEEN.hoverY + 30, dt);
+        if (done) { setBossState(m, 'walk', 0); m.cool = 0.6; }
+        break;
+
+      case 'walk':
+      case 'idle':
+        m.state = 'walk';
+        m.cool -= dt;
+        var spd = m.enraged ? QUEEN.flyEnr : QUEEN.fly;
+        if (tgt) {
+          m.facing = dxT >= 0 ? 1 : -1;
+          // 목표 옆 keepOff 지점을 맴돎 (붙어 있으면 살짝 물러남)
+          var side = dxT >= 0 ? -1 : 1;
+          var goal = (tgt.x + tgt.w / 2) + side * QUEEN.keepOff;
+          var d = goal - bcx(m);
+          var want = Math.abs(d) > 30 ? clamp(d * 1.6, -spd, spd) : 0;
+          m.vx = approach(m.vx, want, 420, dt);
+          if (m.cool <= 0) startQueenPattern(m, chooseQueenPattern(m, tgt), tgt);
+        } else {
+          m.vx = approach(m.vx, 0, 400, dt);
+        }
+        queenHoverTo(m, QUEEN.hoverY, dt);
+        break;
+
+      case 'dive_wind':
+        // 뒤로 물러나며 떠오름 → 표식 지점으로 급강하 준비
+        m.vx = approach(m.vx, -m.facing * 120, 900, dt);
+        queenHoverTo(m, QUEEN.diveRise, dt, 5);
+        if (done) {
+          var sx = bcx(m), sy = m.y;
+          m.d0x = sx; m.d0y = sy;
+          m.d1x = clamp(m.aux + (m.aux - sx), m.w / 2, W.width - m.w / 2);
+          m.d1y = sy;
+          m.dmx = m.aux; m.dmy = gy() - 4 - m.h;
+          m.diveHit = false;
+          setBossState(m, 'dive', QUEEN.diveT * (m.enraged ? 0.85 : 1));
+          shake(6);
+        }
+        break;
+
+      case 'dive':
+        // 2차 베지어: P(0.5) = 바닥점
+        var t = p;
+        var cxp = 2 * m.dmx - (m.d0x + m.d1x) / 2, cyp = 2 * m.dmy - (m.d0y + m.d1y) / 2;
+        var u = 1 - t;
+        var nx = u * u * m.d0x + 2 * u * t * cxp + t * t * m.d1x;
+        var ny2 = u * u * m.d0y + 2 * u * t * cyp + t * t * m.d1y;
+        m.vx = (nx - m.w / 2 - m.x) / dt; m.vy = (ny2 - m.y) / dt;
+        m.x = clamp(nx - m.w / 2, 0, W.width - m.w); m.y = Math.min(ny2, gy() - 4 - m.h);
+        m.facing = m.d1x >= m.d0x ? 1 : -1;
+        if (!m.diveHit && t >= 0.5) {
+          m.diveHit = true;
+          bossEmit({ kind: 'qdive', x: Math.round(bcx(m)) });
+        }
+        if (Math.random() < 0.5) particles(bcx(m) - m.facing * 50, m.y + m.h * 0.5, 2, '#7fe0b8', 140);
+        if (done) {
+          if (m.enraged && !m.slam2 && tgt) {
+            // 격노: 바로 한 번 더
+            m.slam2 = true;
+            m.aux = clamp(tgt.x + tgt.w / 2, 120, W.width - 120);
+            m.facing = m.aux >= bcx(m) ? 1 : -1;
+            setBossState(m, 'dive_wind', 0.45);
+          } else {
+            setBossState(m, 'recover', 0.8 * mul);
+          }
+        }
+        return;   // 위치 직접 계산
+
+      case 'spore_wind':
+        m.vx = approach(m.vx, 0, 900, dt);
+        queenHoverTo(m, QUEEN.hoverY + 40, dt);
+        if (done) setBossState(m, 'spore', 0.6);
+        break;
+
+      case 'spore':
+        queenHoverTo(m, QUEEN.hoverY + 40, dt);
+        if (done) setBossState(m, 'recover', 0.6 * mul);
+        break;
+
+      case 'beam_wind':
+        m.vx = approach(m.vx, 0, 900, dt);
+        queenHoverTo(m, QUEEN.hoverHi, dt, 5);
+        if (done) {
+          var bd = m.enraged ? QUEEN.beamTEnr : QUEEN.beamT;
+          var mpb = mouthPos(m);
+          bossEmit({ kind: 'beam', x0: Math.round(m.ax0), x1: Math.round(m.ax1), dur: bd, back: m.enraged ? 1 : 0,
+                     dy: Math.round(gy() - mpb.y), enr: m.enraged ? 1 : 0 });
+          setBossState(m, 'beam', bd * (m.enraged ? 2 : 1));
+        }
+        break;
+
+      case 'beam':
+        m.vx = approach(m.vx, 0, 900, dt);
+        queenHoverTo(m, QUEEN.hoverHi, dt, 5);
+        // 광선 끝점 쪽으로 몸을 돌림
+        if (done) setBossState(m, 'recover', 0.7 * mul);
+        break;
+
+      case 'summon':
+        m.vx = approach(m.vx, 0, 900, dt);
+        queenHoverTo(m, QUEEN.hoverY + 60, dt);
+        if (done) { summonCrows(m); setBossState(m, 'recover', 0.5); }
+        break;
+
+      case 'gust_wind':
+        m.vx = approach(m.vx, 0, 900, dt);
+        queenHoverTo(m, QUEEN.hoverY + 70, dt);
+        if (done) { fireGust(m, tgt); setBossState(m, 'gust', 0.55); }
+        break;
+
+      case 'gust':
+        queenHoverTo(m, QUEEN.hoverY + 70, dt);
+        if (done) setBossState(m, 'recover', 0.6 * mul);
+        break;
+
+      case 'recover':
+        m.vx = approach(m.vx, 0, 700, dt);
+        queenHoverTo(m, QUEEN.hoverY, dt);
+        if (done) { setBossState(m, 'walk', 0); m.cool = QUEEN.cool * mul; }
+        break;
+
+      default:
+        setBossState(m, 'walk', 0);
+    }
+    queenPhysics(m, dt);
+  }
+
   // ---- 피격 (권한측)
   function resolveAttacker(by, src) {
     if (by !== 'me') return by;
@@ -1118,6 +1577,7 @@
 
   function bossApplyHit(m, dmg, kx, ky, src, by) {
     if (m.state === 'intro') return;          // 낙하 중엔 무적
+    if (m.type === 'centipede' && (m.state === 'dig' || m.state === 'erupt_wind')) return;   // 땅속
     dmg = +dmg || 0;
     if (dmg <= 0) return;
     m.hitFlash = 0.15;
@@ -1130,13 +1590,13 @@
     if (!m.enraged && m.hp < m.maxHp * 0.5) {
       m.enraged = true;
       m.lagHp = m.hp;
-      if (m.state !== 'leap' && m.state !== 'charge') {
+      if (m.state !== 'leap' && m.state !== 'charge' && m.state !== 'dive' && m.state !== 'beam') {
         m.vx = 0;
-        setBossState(m, 'enrage', BOSS.enrageTime);
+        setBossState(m, 'enrage', m.type === 'mossqueen' ? QUEEN.enrageTime : (m.type === 'centipede' ? CENTI.enrageTime : BOSS.enrageTime));
       }
       m.cool = 0.4;
       var mp = mouthPos(m);
-      bossEmit({ kind: 'enrage', x: Math.round(mp.x), dy: Math.round(gy() - mp.y), dir: m.facing });
+      bossEmit({ kind: 'enrage', x: Math.round(mp.x), dy: Math.round(gy() - mp.y), dir: m.facing, type: m.type });
     }
   }
 
@@ -1149,7 +1609,12 @@
     var kp = (killer != null && typeof P.byId === 'function') ? P.byId(killer) : null;
     var name = (kp && kp.name) ? kp.name : (killer === myNetId() && P.local && P.local.name ? P.local.name : '누군가');
     for (var i = Mutants.list.length - 1; i >= 0; i--) if (Mutants.list[i] === m) Mutants.list.splice(i, 1);
-    bossEmit({ kind: 'die', x: Math.round(cx), dy: Math.round(gy() - cy), killer: killer, name: name,
+    bossesKilled++;
+    Mutants.bossesKilled = bossesKilled;
+    bossTimer = bossMode ? RUSH.gap : BOSS.respawn;
+    lastDeadPts = m.segPts || null;
+    bossWarned = false;
+    bossEmit({ kind: 'die', x: Math.round(cx), dy: Math.round(gy() - cy), killer: killer, name: name, type: m.type, count: bossesKilled,
                facing: m.facing, enr: m.enraged ? 1 : 0, src: m.killSrc || null });
     if (killer != null && typeof Game.awardPoint === 'function') {
       try { Game.awardPoint(killer, 1, 'boss'); } catch (e) { if (window.console) console.error('[boss] awardPoint', e); }
@@ -1162,15 +1627,16 @@
         try { Game.Items.spawnAt(clamp(cx + (k - 1) * 90, 30, world().width - 30), 0, kinds[k]); } catch (e2) { /* 무시 */ }
       }
     }
-    bossTimer = BOSS.respawn;
-    bossWarned = false;
   }
 
   // ---- 접촉 피해 (로컬: 모든 클라이언트 / 봇: 권한측)
   function checkBossContact(m, dt) {
+    if (m.type === 'centipede') { centContact(m, dt); return; }
     if (m.state === 'intro' || m.state === 'leap') return;   // 낙하·도약 착지는 충격 범위 판정으로 처리
-    var charging = m.state === 'charge';
-    var box = { x: m.x + 10, y: m.y + 16, w: m.w - 20, h: m.h - 16 };
+    var Q = m.type === 'mossqueen';
+    var charging = m.state === (Q ? 'dive' : 'charge');
+    var box = Q ? { x: m.x + 14, y: m.y + 10, w: m.w - 28, h: m.h - 14 } : { x: m.x + 10, y: m.y + 16, w: m.w - 20, h: m.h - 16 };
+    var T = TYPES[m.type] || TYPES.behemoth;
     for (var k in m.botCd) if (m.botCd[k] > 0) m.botCd[k] -= dt;
     forVictims(function (p, key, isLocal) {
       if (!rectHit(box, p)) return;
@@ -1178,8 +1644,9 @@
       if (cd > 0) return;
       var dir = (p.x + p.w / 2) >= bcx(m) ? 1 : -1;
       var ok;
-      if (charging) ok = hurt(p, isLocal, BOSS.chargeDmg, m.facing * BOSS.chargeKx, BOSS.chargeKy);
-      else ok = hurt(p, isLocal, BOSS.contactDmg, dir * TYPES.boss.knockX, TYPES.boss.knockY);
+      if (charging && Q) ok = hurt(p, isLocal, QUEEN.diveDmg, (m.vx >= 0 ? 1 : -1) * QUEEN.diveKx, QUEEN.diveKy);
+      else if (charging) ok = hurt(p, isLocal, BOSS.chargeDmg, m.facing * BOSS.chargeKx, BOSS.chargeKy);
+      else ok = hurt(p, isLocal, BOSS.contactDmg, dir * T.knockX, T.knockY);
       if (ok || !isLocal) {
         if (isLocal) m.dmgCd = charging ? 0.8 : BOSS.contactCd; else m.botCd[key] = charging ? 0.8 : BOSS.contactCd;
       }
@@ -1233,7 +1700,7 @@
         });
         // 발판 / 땅에 닿으면 웅덩이
         var landY = null;
-        if (f.vy > 0 && W.platforms) {
+        if (f.vy > 0 && W.platforms && !W.platformsLocked) {
           for (var pi = 0; pi < W.platforms.length; pi++) {
             var pl = W.platforms[pi];
             if (pl && f.x > pl.x && f.x < pl.x + pl.w && oy <= pl.y && f.y >= pl.y) { landY = pl.y; break; }
@@ -1256,6 +1723,119 @@
         });
         if (Math.random() < 0.25) particles(f.x + rand(-f.w / 2, f.w / 2), f.y - 4, 1, TOXIC, 60);
         if (f.t >= f.life) alive = false;
+      } else if (f.kind === 'slag') {
+        // 레일 돌진 자국: 녹은 쇳물 띠
+        var sz = { x: f.x0, y: G0 - 14, w: f.x1 - f.x0, h: 14 };
+        for (var sk in f.cd) if (f.cd[sk] > 0) f.cd[sk] -= dt;
+        forVictims(function (p, key, isLocal) {
+          if ((f.cd[key] || 0) > 0 || !rectHit(sz, p)) return;
+          f.cd[key] = CENTI.slagTick;
+          hurt(p, isLocal, CENTI.slagDmg, 0, -160);
+        });
+        if (Math.random() < 0.5) particles(rand(f.x0, f.x1), G0 - 3, 1, Math.random() < 0.5 ? '#ffcf7a' : '#ff7a2a', 120);
+        if (f.t >= f.life) alive = false;
+      } else if (f.kind === 'scrap') {
+        if (f.delay > 0) { f.delay -= dt; keep.push(f); continue; }
+        var sg = gravity() * 0.5;
+        f.vy += sg * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.rot += dt * 12;
+        forVictims(function (p, key, isLocal) {
+          if (f.hit[key]) return;
+          var nx = clamp(f.x, p.x, p.x + p.w), ny = clamp(f.y, p.y, p.y + p.h);
+          var dx = f.x - nx, dy = f.y - ny;
+          if (dx * dx + dy * dy > CENTI.scrapR * CENTI.scrapR) return;
+          f.hit[key] = true;
+          hurt(p, isLocal, CENTI.scrapDmg, (f.vx >= 0 ? 1 : -1) * 320, -340);
+          particles(f.x, f.y, 8, '#ffcf7a', 220);
+        });
+        if (f.y >= G0) {
+          alive = false;
+          particles(f.x, G0 - 4, 12, '#ff9a3a', 240);
+          keep.push({ kind: 'molten', x: f.x, w: CENTI.moltenW, life: CENTI.moltenLife, t: 0, cd: {} });
+        }
+        if (f.t > 4) alive = false;
+      } else if (f.kind === 'molten') {
+        var mz = { x: f.x - f.w / 2, y: G0 - 14, w: f.w, h: 14 };
+        for (var mk2 in f.cd) if (f.cd[mk2] > 0) f.cd[mk2] -= dt;
+        forVictims(function (p, key, isLocal) {
+          if ((f.cd[key] || 0) > 0 || !rectHit(mz, p)) return;
+          f.cd[key] = CENTI.slagTick;
+          hurt(p, isLocal, CENTI.moltenDmg, 0, -140);
+        });
+        if (f.t >= f.life) alive = false;
+      } else if (f.kind === 'pod') {
+        // 포자 폭탄: 여왕 몸에서 떨어져 표식 지점으로 낙하 → 포자 구름
+        if (f.delay > 0) { f.delay -= dt; keep.push(f); continue; }
+        f.ft += dt;
+        var pq = clamp(f.ft / f.fall, 0, 1);
+        var ox2 = f.cx != null ? f.cx : f.sx, oy2 = f.cy != null ? f.cy : f.y0;
+        f.cx = f.sx + (f.x - f.sx) * easeOut(pq);
+        f.cy = f.y0 + (G0 - f.y0) * pq * pq;
+        f.vx2 = (f.cx - ox2) / dt; f.vy2 = (f.cy - oy2) / dt;
+        forVictims(function (p, key, isLocal) {
+          if (f.hit[key]) return;
+          var nx = clamp(f.cx, p.x, p.x + p.w), ny = clamp(f.cy, p.y, p.y + p.h);
+          var dx = f.cx - nx, dy = f.cy - ny;
+          if (dx * dx + dy * dy > 18 * 18) return;
+          f.hit[key] = true;
+          hurt(p, isLocal, QUEEN.sporeDmg, (p.x + p.w / 2 >= f.cx ? 1 : -1) * 260, -300);
+        });
+        if (pq >= 1) {
+          alive = false;
+          particles(f.x, G0 - 10, 18, '#c6ff7a', 260);
+          particles(f.x, G0 - 16, 10, '#b28cff', 180);
+          shake(3);
+          keep.push({ kind: 'cloud', x: f.x, r: QUEEN.cloudR, life: QUEEN.cloudLife * (f.enr ? 1.25 : 1), t: 0, cd: {}, dmg: QUEEN.cloudDmg });
+        }
+      } else if (f.kind === 'cloud') {
+        if (f.dmg > 0 && f.t > 0.15) {
+          var cz = { x: f.x - f.r, y: G0 - f.r * 1.05, w: f.r * 2, h: f.r * 1.05 };
+          for (var ck2 in f.cd) if (f.cd[ck2] > 0) f.cd[ck2] -= dt;
+          forVictims(function (p, key, isLocal) {
+            if ((f.cd[key] || 0) > 0 || !rectHit(cz, p)) return;
+            f.cd[key] = QUEEN.cloudTick;
+            hurt(p, isLocal, f.dmg, 0, -100);
+          });
+        }
+        if (f.t >= f.life) alive = false;
+      } else if (f.kind === 'beam') {
+        // 독성 광선: 땅을 따라 x0 → x1 (격노: 되돌아오기까지)
+        var bt = f.t / f.dur;
+        var total = f.back ? 2 : 1;
+        if (bt >= total) { alive = false; }
+        else {
+          var fwd = bt < 1;
+          var bp = fwd ? bt : 2 - bt;
+          f.bx = f.x0 + (f.x1 - f.x0) * bp;
+          var hz = { x: f.bx - QUEEN.beamW / 2, y: G0 - QUEEN.beamH, w: QUEEN.beamW, h: QUEEN.beamH };
+          var hset = fwd ? f.hit : f.hit2;
+          forVictims(function (p, key, isLocal) {
+            if (hset[key] || !rectHit(hz, p)) return;
+            hset[key] = true;
+            hurt(p, isLocal, QUEEN.beamDmg, ((f.x1 - f.x0) >= 0 ? 1 : -1) * (fwd ? 1 : -1) * 380, -520);
+          });
+          if (!f.lastScorch || Math.abs(f.bx - f.lastScorch) > 26) { f.lastScorch = f.bx; f.scorch.push(f.bx, f.t); }
+          if (Math.random() < 0.8) particles(f.bx + rand(-12, 12), G0 - 6, 1, Math.random() < 0.5 ? '#e6ff9a' : '#ff5ad2', 220);
+        }
+        if (!alive) {
+          // 그을음 자국은 잠시 남김
+          keep.push({ kind: 'scorch', list: f.scorch, life: 1.6, t: 0 });
+        }
+      } else if (f.kind === 'dart') {
+        if (f.delay > 0) { f.delay -= dt; keep.push(f); continue; }
+        f.x += f.vx * dt; f.y += f.vy * dt;
+        forVictims(function (p, key, isLocal) {
+          if (f.hit[key]) return;
+          if (f.x < p.x - 6 || f.x > p.x + p.w + 6 || f.y < p.y - 6 || f.y > p.y + p.h + 6) return;
+          f.hit[key] = true;
+          hurt(p, isLocal, QUEEN.dartDmg, (f.vx >= 0 ? 1 : -1) * 300, -260);
+          particles(f.x, f.y, 6, '#c6ff7a', 160);
+        });
+        if (f.y >= G0 - 2) {
+          alive = false;
+          particles(f.x, G0 - 4, 5, '#c9b48a', 120);
+          keep.push({ kind: 'stuck', x: f.x, a: Math.atan2(f.vy, f.vx), life: 1.4, t: 0 });
+        }
+        if (f.t > 3 || f.x < -50 || f.x > W.width + 50) alive = false;
       } else {
         if (f.t >= (f.life || 1)) alive = false;
       }
@@ -1288,6 +1868,14 @@
         '#boss-hud .bh-ticks{position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(0,0,0,0) 0 calc(10% - 1px),rgba(0,0,0,.45) calc(10% - 1px) 10%)}',
         '#boss-hud .bh-mid{position:absolute;left:50%;top:-2px;bottom:-2px;width:2px;background:#e07a35;box-shadow:0 0 4px #e07a35}',
         '#boss-hud.enr .bh-fill{background:repeating-linear-gradient(115deg,rgba(255,255,255,.12) 0 6px,rgba(0,0,0,0) 6px 14px),linear-gradient(180deg,#ffb07a,#ff5a2a 45%,#8a2410);box-shadow:0 0 12px rgba(255,90,42,.7)}',
+        '#boss-hud.queen .bh-name{color:#e6d4ff;text-shadow:0 0 8px rgba(190,120,255,.55),0 2px 0 #2a1a40}',
+        '#boss-hud.queen .bh-bar{border-color:#7a5ab8}',
+        '#boss-hud.queen .bh-fill{background:repeating-linear-gradient(115deg,rgba(255,255,255,.10) 0 6px,rgba(0,0,0,0) 6px 14px),linear-gradient(180deg,#d8ffb0,#7fe0b8 40%,#3c6a58)}',
+        '#boss-hud.queen.enr .bh-fill{background:repeating-linear-gradient(115deg,rgba(255,255,255,.12) 0 6px,rgba(0,0,0,0) 6px 14px),linear-gradient(180deg,#ffb0e0,#ff5ad2 45%,#6a1a5a);box-shadow:0 0 12px rgba(255,90,210,.7)}',
+        '#boss-hud.centi .bh-name{color:#ffd9a0;text-shadow:0 0 8px rgba(255,140,40,.6),0 2px 0 #1a1f1e}',
+        '#boss-hud.centi .bh-bar{border-color:#8a949a}',
+        '#boss-hud.centi .bh-fill{background:repeating-linear-gradient(115deg,rgba(255,255,255,.10) 0 6px,rgba(0,0,0,0) 6px 14px),linear-gradient(180deg,#ffe2a0,#ff9a3a 40%,#7a3a14)}',
+        '#boss-hud.centi.enr .bh-fill{background:repeating-linear-gradient(115deg,rgba(255,255,255,.12) 0 6px,rgba(0,0,0,0) 6px 14px),linear-gradient(180deg,#fff0c0,#ff3a1a 45%,#5a0a04);box-shadow:0 0 12px rgba(255,60,20,.8)}',
         '#boss-hud.enr .bh-bar{animation:bhPulse .7s ease-in-out infinite alternate}',
         '@keyframes bhPulse{from{box-shadow:inset 0 0 8px rgba(0,0,0,.8),0 0 6px rgba(255,90,42,.3)}to{box-shadow:inset 0 0 8px rgba(0,0,0,.8),0 0 18px rgba(255,90,42,.85)}}',
         '#boss-warn{position:absolute;top:22%;left:50%;transform:translateX(-50%);z-index:3;pointer-events:none;font-family:var(--font-title,sans-serif);font-size:clamp(1.6rem,5vw,3rem);letter-spacing:.12em;color:#ff7a3a;text-shadow:0 0 18px rgba(255,80,30,.9),0 3px 0 #3a1408;white-space:nowrap;animation:bwBlink .5s steps(2,end) infinite}',
@@ -1320,12 +1908,23 @@
   function bossHudSync(b) {
     if (!ensureHud()) return;
     var showWarn = warnT > 0 && !b;
+    if (showWarn && hudState.wtype !== warnType + bossWarnNum) {
+      hudState.wtype = warnType + bossWarnNum;
+      warnEl.innerHTML = '⚠ 보스 출현! <small>' + (bossMode && bossWarnNum ? '보스전 ' + bossWarnNum + '번째 · ' : '') + bossName(warnType) + '</small>';
+    }
     if (showWarn !== hudState.warn) { hudState.warn = showWarn; warnEl.hidden = !showWarn; }
     if (!b) {
       if (hudState.shown) { hudState.shown = false; hudEl.hidden = true; }
       return;
     }
     if (!hudState.shown) { hudState.shown = true; hudEl.hidden = false; hudState.ratio = -1; }
+    if (hudState.type !== b.type) {
+      hudState.type = b.type;
+      hudName.textContent = bossName(b.type);
+      if (hudEl.classList) hudEl.classList.toggle('queen', b.type === 'mossqueen');
+      if (hudEl.classList) hudEl.classList.toggle('centi', b.type === 'centipede');
+      hudState.ratio = -1;
+    }
     var r = clamp(b.hp / (b.maxHp || 1), 0, 1);
     var pct = Math.round(r * 1000) / 10;
     if (pct !== hudState.ratio) {
@@ -1341,22 +1940,120 @@
     }
   }
 
+  // ---------------------------------------------------------------- 발판 봉쇄 (모든 클라이언트)
+  // 보스가 살아 있는 동안 (등장 연출 포함) Game.world.platformsLocked = true.
+  // 물리(한 방향 발판 무시)는 world.js 가 담당, 여기선 플래그 + 시각효과 + 알림.
+  function setLock(on, silent) {
+    var W = Game.world;
+    if (W) W.platformsLocked = !!on;
+    if (on === lockedPrev) return;
+    lockedPrev = !!on;
+    if (silent) { lockAnim = on ? 1 : 0; return; }
+    if (on) {
+      lockSince = clock;
+      queueToast('⚠ 보스 출현 — 발판이 봉쇄되었습니다!');
+      shake(6);
+      var pl = (W && W.platforms) || [];
+      for (var i = 0; i < pl.length; i++) {
+        if (pl[i]) particles(pl[i].x + pl[i].w / 2, pl[i].y - 4, 6, '#ff3a3a', 200);
+      }
+    } else {
+      queueToast('발판 봉쇄 해제');
+    }
+  }
+
+  // 발판 위 봉쇄 표시: 붉은 경고 줄무늬 + 에너지 장벽 + ⛔ 깜빡임
+  function renderPlatformLock(ctx) {
+    if (lockAnim <= 0) return;
+    var W = world();
+    var pl = W.platforms || [];
+    var a = lockAnim;
+    var t = clock;
+    var flick = 0.75 + 0.25 * Math.sin(t * 9) * Math.sin(t * 23.7);
+    ctx.save();
+    for (var i = 0; i < pl.length; i++) {
+      var p = pl[i];
+      if (!p) continue;
+      var x = p.x, y = p.y, w = p.w;
+      // 바닥 쪽으로 번지는 에너지 장벽 (발판 위로 솟는 붉은 막)
+      var hh = 34 * a;
+      var g = ctx.createLinearGradient(0, y - hh, 0, y);
+      g.addColorStop(0, 'rgba(255,40,40,0)');
+      g.addColorStop(1, 'rgba(255,50,40,' + (0.42 * a * flick).toFixed(3) + ')');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y - hh, w, hh);
+      // 세로 스캔 줄
+      ctx.fillStyle = 'rgba(255,120,110,' + (0.35 * a * flick).toFixed(3) + ')';
+      var off = (t * 40) % 18;
+      for (var sx = x + off; sx < x + w; sx += 18) ctx.fillRect(sx, y - hh * 0.85, 1.5, hh * 0.85);
+      // 윗면 경고 줄무늬 (빨강/검정 사선)
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x, y - 3, w, 9); ctx.clip();
+      ctx.fillStyle = 'rgba(20,6,6,' + (0.85 * a).toFixed(3) + ')';
+      ctx.fillRect(x, y - 3, w, 9);
+      ctx.fillStyle = 'rgba(255,50,40,' + (0.95 * a).toFixed(3) + ')';
+      var so = (t * 30) % 16;
+      for (var k = x - 16 + so; k < x + w + 16; k += 16) {
+        ctx.beginPath();
+        ctx.moveTo(k, y + 6); ctx.lineTo(k + 8, y + 6); ctx.lineTo(k + 14, y - 3); ctx.lineTo(k + 6, y - 3);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+      // 윗선 발광
+      ctx.shadowColor = '#ff2a2a'; ctx.shadowBlur = 10 * a;
+      ctx.fillStyle = 'rgba(255,90,80,' + (0.9 * a * flick).toFixed(3) + ')';
+      ctx.fillRect(x, y - 4, w, 2);
+      ctx.fillRect(x, y - hh, w, 1);
+      ctx.shadowBlur = 0;
+      // 양 끝 기둥 + 가운데 ⛔ 표시 (깜빡임)
+      ctx.fillStyle = 'rgba(255,70,60,' + (0.8 * a).toFixed(3) + ')';
+      ctx.fillRect(x, y - hh, 3, hh); ctx.fillRect(x + w - 3, y - hh, 3, hh);
+      var blink = ((t * 2.2 + i * 0.37) % 1) < 0.62 ? 1 : 0.25;
+      ctx.globalAlpha = a * blink;
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⛔', x + w / 2, y - 18);
+      ctx.globalAlpha = 1;
+    }
+    // 봉쇄 직후 펄스 링
+    var since = clock - lockSince;
+    if (lockedPrev && since < 0.8) {
+      ctx.strokeStyle = 'rgba(255,60,50,' + (0.8 * (1 - since / 0.8)).toFixed(3) + ')';
+      ctx.lineWidth = 3;
+      for (var j = 0; j < pl.length; j++) {
+        var q = pl[j]; if (!q) continue;
+        var e = 6 + since * 40;
+        ctx.strokeRect(q.x - e, q.y - 4 - e * 0.5, q.w + e * 2, 8 + e);
+      }
+    }
+    ctx.restore();
+  }
+
   // ---------------------------------------------------------------- 공개 API
   var Mutants = {
     list: [],
     types: TYPES,
 
-    init: function () {
+    // opts = { mode, bossMode } (선택). 인자 없이 부르면 Game.bossMode 를 따름 (구버전 호환)
+    init: function (opts) {
       registerHandlers();
+      bossMode = (opts && typeof opts === 'object' && opts.bossMode != null) ? !!opts.bossMode : !!Game.bossMode;
+      Mutants.bossMode = bossMode;
       Mutants.list = [];
       nextId = 1;
       spawnTimer = FIRST_SPAWN;
       matchTime = 0;
       snapTimer = 0;
-      bossTimer = BOSS.firstAt;
+      bossTimer = bossMode ? RUSH.first : BOSS.firstAt;
       bossWarned = false;
+      nextBossIdx = 0;
+      bossesKilled = 0;
+      bossWarnNum = 0;
+      Mutants.bossesKilled = 0;
       bossFx = [];
       warnT = 0;
+      toastQ = [];
+      setLock(false, true);
       bossHudSync(null);
     },
 
@@ -1365,7 +2062,8 @@
       if (dt > 0.05) dt = 0.05;
       clock += dt;
       registerHandlers();
-      if (Game.running === false) { bossHudSync(null); return; }
+      pumpToasts();
+      if (Game.running === false) { bossHudSync(null); setLock(false, true); return; }
       var auth = isAuthority();
       var i, m;
 
@@ -1375,7 +2073,8 @@
           spawnTimer -= dt;
           if (spawnTimer <= 0) {
             spawnTimer = rand(10, 14);
-            if (!findBoss()) spawnWave();   // 보스전 중엔 일반 출현 쉼 (보스가 쥐를 부름)
+            // 보스 생존 중엔 일반 출현 쉼 (보스가 쥐/까마귀를 부름). 보스전 모드는 일반 출현 없음
+            if (!findBoss() && !bossMode) spawnWave();
           }
           bossSchedule(dt);
         }
@@ -1400,10 +2099,15 @@
         } else {
           updateGuestMutant(m, dt);
         }
+        if (m.type === 'centipede') centTrail(m);
         if (m.boss) checkBossContact(m, dt); else checkAttack(m);
       }
       updateBossFx(dt);
-      bossHudSync(findBoss());
+      var curBoss = findBoss();
+      setLock(!!curBoss, false);
+      if (lockAnim < 1 && curBoss) lockAnim = Math.min(1, lockAnim + dt * 2.5);
+      else if (!curBoss && lockAnim > 0) lockAnim = Math.max(0, lockAnim - dt * 1.6);
+      bossHudSync(curBoss);
 
       if (auth) {
         // 죽은 개체 제거
@@ -1456,6 +2160,9 @@
     render: function (ctx) {
       if (!ctx) return;
       var i, m;
+      ctx.save();
+      try { renderPlatformLock(ctx); } catch (eL) { /* 무시 */ }
+      ctx.restore();
       // 보스와 바닥 표식은 작은 돌연변이 뒤에
       ctx.save();
       try { renderBossUnder(ctx); } catch (e0) { /* 무시 */ }
@@ -1464,7 +2171,7 @@
         m = Mutants.list[i];
         if (!m.alive || !m.boss) continue;
         ctx.save();
-        try { drawBoss(ctx, m); } catch (e1) { if (window.console) console.error('[boss] draw', e1); }
+        try { if (m.type === 'mossqueen') drawQueen(ctx, m); else if (m.type === 'centipede') drawCenti(ctx, m); else drawBoss(ctx, m); } catch (e1) { if (window.console) console.error('[boss] draw', e1); }
         ctx.restore();
       }
       for (i = 0; i < Mutants.list.length; i++) {
@@ -1483,14 +2190,34 @@
     // 현재 보스 (없으면 null)
     boss: function () { return findBoss(); },
     bossInfo: BOSS,
+    queenInfo: QUEEN,
+    bossNames: BOSS_NAMES,
+    bossOrder: BOSS_ORDER,
+    bossMode: false,
+    bossesKilled: 0,
+    // 다음 보스까지 남은 시간 (권한측; 보스 생존 중엔 null)
+    nextBossIn: function () { return findBoss() ? null : Math.max(0, bossTimer); },
+    nextBossType: function () { return nextBossType(); },
 
     // 테스트/디버그용
     _debug: {
-      spawnBoss: function (x) { return spawnBoss(typeof x === 'number' ? x : null, true); },
+      // spawnBoss(type?, x?) — type: 'behemoth'|'mossqueen'|'centipede' (생략 시 순서대로). 구버전 spawnBoss(x) 도 허용
+      spawnBoss: function (a, b) {
+        var type = typeof a === 'string' ? a : null;
+        var x = typeof a === 'number' ? a : (typeof b === 'number' ? b : null);
+        return spawnBoss(x, true, type);
+      },
+      killBoss: function (by) { var b = findBoss(); if (b && isAuthority()) { b.killer = by != null ? by : myNetId(); bossDie(b); } },
       bossWarn: function () { bossTimer = BOSS.warn + 0.01; bossWarned = false; },
       setBossTimer: function (t) { bossTimer = t; },
       getBossTimer: function () { return bossTimer; },
-      forcePattern: function (p) { var b = findBoss(); if (b && isAuthority()) startPattern(b, p, nearestTarget(b)); return b ? b.state : null; },
+      forcePattern: function (p) {
+        var b = findBoss();
+        if (b && isAuthority()) { if (b.type === 'mossqueen') startQueenPattern(b, p, nearestTarget(b)); else if (b.type === 'centipede') startCentiPattern(b, p, nearestTarget(b)); else startPattern(b, p, nearestTarget(b)); }
+        return b ? b.state : null;
+      },
+      getBossesKilled: function () { return bossesKilled; },
+      setBossMode: function (on) { bossMode = !!on; Mutants.bossMode = bossMode; },
       bossFx: function () { return bossFx; },
       onBossFx: function (msg) { onBossFxMsg(msg); },
       sendSnapshot: sendSnapshot,
@@ -1586,6 +2313,7 @@
 
     if (m.type === 'rat') drawRat(ctx, m, wind, intensity);
     else if (m.type === 'dog') drawDog(ctx, m, wind, intensity);
+    else if (m.type === 'drone') drawDrone(ctx, m, wind, intensity);
     else drawCrow(ctx, m, wind, intensity);
 
     if (m.hitFlash > 0) {
@@ -2492,6 +3220,8 @@
         ctx.stroke();
         ctx.fillStyle = 'rgba(141,255,60,' + (0.35 * ca).toFixed(3) + ')';
         ctx.fillRect(f.x - f.w * 0.3, G0 - 3, f.w * 0.6, 3);
+      } else if (f.kind === 'pod' || f.kind === 'scorch') {
+        renderQueenGroundFx(ctx, f, G0);
       } else if (f.kind === 'glob') {
         // 착탄 지점 예고
         var gA = 0.5 + 0.5 * Math.sin(clock * 16);
@@ -2504,6 +3234,8 @@
     // 보스 상태별 예고
     var b = findBoss();
     if (!b) return;
+    if (b.type === 'mossqueen') { renderQueenTele(ctx, b, G0); return; }
+    if (b.type === 'centipede') { renderCentiTele(ctx, b, G0); return; }
     var cx = bcx(b);
     var tele = 0.5 + 0.5 * Math.sin(clock * 22);
     var dur = b.stateDur > 0 ? b.stateDur : 1;
@@ -2616,8 +3348,31 @@
           ctx.arc(f.x, f.y, 30 + q * 260, f.dir > 0 ? -0.9 : Math.PI - 0.9, f.dir > 0 ? 0.9 : Math.PI + 0.9);
           ctx.stroke();
         }
+      } else if (f.kind === 'beam' || f.kind === 'dart' || f.kind === 'gustfx' || f.kind === 'stuck' || f.kind === 'cloud' || (f.kind === 'pod' && f.delay <= 0)) {
+        renderQueenAirFx(ctx, f, G0);
+      } else if (f.kind === 'slag' || f.kind === 'scrap' || f.kind === 'molten' || f.kind === 'whipfx') {
+        renderCentiFx(ctx, f, G0);
+      } else if (f.kind === 'corpse' && f.type === 'centipede') {
+        var CT = TYPES.centipede;
+        var cfake = { type: 'centipede', x: f.x - CT.w / 2, y: G0 - CT.h, w: CT.w, h: CT.h, seed: 0.5, segPts: f.pts,
+                      facing: f.facing, enraged: f.enr, animT: 0, vx: 0, vy: 0, hitFlash: 0,
+                      state: 'dead', stateTimer: Math.max(0, f.life - f.t), stateDur: f.life };
+        ctx.save();
+        try { drawCenti(ctx, cfake); } catch (ec) { /* 무시 */ }
+        ctx.restore();
+      } else if (f.kind === 'corpse' && f.type === 'mossqueen') {
+        var QT = TYPES.mossqueen;
+        var fq = clamp(f.t / 0.9, 0, 1);
+        var qy0 = (f.y || G0 - QT.h / 2) - QT.h / 2;
+        var qfake = { type: 'mossqueen', x: f.x - QT.w / 2, y: qy0 + (G0 - QT.h - qy0) * fq * fq, w: QT.w, h: QT.h, seed: 0.3,
+                      facing: f.facing, enraged: f.enr, animT: 0, vx: 0, vy: 0, hitFlash: 0,
+                      state: 'dead', stateTimer: Math.max(0, f.life - f.t), stateDur: f.life };
+        ctx.save();
+        try { drawQueen(ctx, qfake); } catch (eq) { /* 무시 */ }
+        ctx.restore();
       } else if (f.kind === 'corpse') {
-        var fake = { x: f.x - TYPES.boss.w / 2, y: G0 - TYPES.boss.h, w: TYPES.boss.w, h: TYPES.boss.h,
+        var BT = TYPES.behemoth;
+        var fake = { x: f.x - BT.w / 2, y: G0 - BT.h, w: BT.w, h: BT.h,
                      facing: f.facing, enraged: f.enr, animT: 0, vx: 0, vy: 0, hitFlash: 0,
                      state: 'dead', stateTimer: Math.max(0, f.life - f.t), stateDur: f.life };
         ctx.save();
@@ -2625,5 +3380,1430 @@
         ctx.restore();
       }
     }
+  }
+
+  // ================================================================ 보스 그래픽 '이끼 여왕'
+  // 정면을 향한 거대한 이끼 나방: 양옆으로 펼친 두 쌍의 날개(눈알 무늬 발광), 털 많은 가슴, 깃털 더듬이,
+  // 녹슨 철근 왕관, 포자 주머니가 달린 늘어진 배, 매달린 여섯 다리. 오프스크린에 그린 뒤 덧칠/합성.
+  var QW = 640, QH = 560, QX = 320, QY = 250;   // 오프스크린 (원점 = 몸통 판정 윗변 중앙)
+  var qCv = null, qK = 0;
+  var VIOLET = '#b28cff', PINK = '#ff5ad2';
+
+  function getQOff(k) {
+    if (typeof document === 'undefined') return null;
+    if (!qCv) qCv = document.createElement('canvas');
+    if (qK !== k) {
+      qK = k;
+      qCv.width = Math.ceil(QW * k);
+      qCv.height = Math.ceil(QH * k);
+    }
+    return qCv;
+  }
+
+  function queenPose(m) {
+    var st = m.state;
+    var dur = m.stateDur > 0 ? m.stateDur : 1;
+    var p = clamp(1 - m.stateTimer / dur, 0, 1);
+    var pulse = 0.5 + 0.5 * Math.sin(clock * 26);
+    var P = {
+      flapSpd: 8, flapAmp: 1, flapBias: 0, tele: 0, lean: clamp((m.vx || 0) * (m.facing || 1) / 900, -0.3, 0.3) * 0.35,
+      head: Math.sin(clock * 1.6) * 0.04, eye: 0.35, mouth: 0, sac: 0.25, jit: 0, dead: 0, fold: 0
+    };
+    switch (st) {
+      case 'intro':
+        P.flapSpd = 5; P.flapAmp = 0.7; P.fold = 0.35 * (1 - p); P.eye = 0.6;
+        break;
+      case 'roar': case 'enrage': case 'summon':
+        P.flapSpd = 15; P.flapAmp = 1.1; P.mouth = 0.6; P.eye = 0.8 + 0.2 * pulse; P.head = -0.16;
+        P.jit = st === 'enrage' ? 2.2 : 1; P.tele = st === 'roar' ? 0 : pulse * 0.6;
+        break;
+      case 'dive_wind':
+        P.flapSpd = 14; P.flapBias = -0.55; P.flapAmp = 0.5; P.tele = pulse; P.eye = 0.6 + 0.4 * pulse; P.jit = 1; P.lean = -0.12;
+        break;
+      case 'dive':
+        P.fold = 0.8; P.flapSpd = 3; P.flapAmp = 0.15; P.eye = 1;
+        P.lean = clamp(Math.abs(m.vx || 0) / 1500, 0, 0.5) * (((m.vy || 0) > 0) ? 1 : 0.4);
+        break;
+      case 'spore_wind':
+        P.sac = 0.4 + 0.6 * p; P.tele = pulse; P.flapSpd = 12; P.eye = 0.6;
+        break;
+      case 'spore':
+        P.sac = 1 - p; P.flapSpd = 11;
+        break;
+      case 'beam_wind':
+        P.mouth = p; P.eye = 0.6 + 0.4 * pulse; P.tele = pulse; P.head = 0.22 * easeOut(p); P.flapSpd = 10; P.jit = 0.8;
+        break;
+      case 'beam':
+        P.mouth = 1; P.eye = 1; P.head = 0.28; P.flapSpd = 10; P.flapAmp = 0.8;
+        break;
+      case 'gust_wind':
+        P.flapBias = -0.95 * easeOut(p * 1.3); P.flapAmp = 0.1; P.tele = pulse; P.eye = 0.8; P.jit = 1;
+        break;
+      case 'gust':
+        P.flapBias = -0.95 + 2.0 * easeOut(clamp(p * 2.5, 0, 1)); P.flapAmp = 0.05; P.eye = 0.9;
+        break;
+      case 'recover':
+        P.flapSpd = 7;
+        break;
+      case 'dead':
+        P.dead = p; P.fold = 0.55 * easeOut(p * 1.5); P.flapSpd = 2; P.flapAmp = 0.35 * (1 - p); P.eye = 0; P.lean = 0.35 * easeOut(p);
+        break;
+    }
+    if (m.enraged && st !== 'dead') { P.eye = Math.max(P.eye, 0.6 + 0.3 * Math.sin(clock * 9)); P.flapSpd *= 1.2; }
+    // 날갯짓 위상은 누적 (상태가 바뀌어도 날개가 튀지 않게)
+    var dtR = m._fpT != null ? clamp(clock - m._fpT, 0, 0.1) : 0;
+    m._fpT = clock;
+    m._fp = (m._fp || m.seed * 10) + dtR * P.flapSpd;
+    P.flap = clamp(Math.sin(m._fp) * P.flapAmp + P.flapBias, -1.2, 1.2);   // -1 = 위로, +1 = 아래로
+    P.flapLag = clamp(Math.sin(m._fp - 0.6) * P.flapAmp + P.flapBias, -1.2, 1.2);
+    return P;
+  }
+
+  // 날개 눈알 무늬
+  function ocellus(o, x, y, r, col, glow) {
+    o.save();
+    o.fillStyle = '#120c06';
+    o.beginPath(); o.ellipse(x, y, r * 1.25, r * 1.1, 0, 0, Math.PI * 2); o.fill();
+    o.fillStyle = '#c9b48a';
+    o.beginPath(); o.ellipse(x, y, r * 1.02, r * 0.92, 0, 0, Math.PI * 2); o.fill();
+    o.shadowColor = col; o.shadowBlur = 4 + glow * 16;
+    o.fillStyle = col;
+    o.beginPath(); o.ellipse(x, y, r * 0.82, r * 0.74, 0, 0, Math.PI * 2); o.fill();
+    o.shadowBlur = 0;
+    o.fillStyle = '#16200c';
+    o.beginPath(); o.ellipse(x + r * 0.08, y, r * 0.42, r * 0.4, 0, 0, Math.PI * 2); o.fill();
+    o.fillStyle = 'rgba(255,255,240,' + (0.6 + 0.4 * glow).toFixed(3) + ')';
+    o.beginPath(); o.arc(x - r * 0.2, y - r * 0.22, r * 0.18, 0, Math.PI * 2); o.fill();
+    o.restore();
+  }
+
+  // 날개 한 쌍 (side = +1 앞쪽/-1 뒤쪽, 좌우 대칭). 지역 좌표: +x = 날개 끝 방향, -y = 앞 가장자리
+  function queenWings(o, side, P, enr, seed, far) {
+    var sc = far ? 0.88 : 1;
+    var fold = P.fold;
+    var lenK = (1 - 0.42 * fold) * sc;
+    var angF = 0.5 - 0.62 * P.flap + fold * 0.85;
+    var angH = 0.02 - 0.5 * P.flapLag + fold * 0.95;
+    var eyeCol = enr ? PINK : TOXIC;
+    var glow = P.eye;
+    // ---- 뒷날개
+    o.save();
+    o.translate(side * 16, 74);
+    o.scale(side, 1);
+    o.rotate(-angH);
+    o.scale(lenK, sc);
+    var hg = o.createRadialGradient(30, 40, 6, 60, 50, 175);
+    hg.addColorStop(0, far ? '#1c1626' : '#2a2034');
+    hg.addColorStop(0.45, far ? '#3a3052' : '#54467a');
+    hg.addColorStop(0.8, far ? '#4a3c64' : '#7a6aa0');
+    hg.addColorStop(1, '#2a1e3a');
+    o.fillStyle = hg;
+    o.beginPath();
+    o.moveTo(0, 2);
+    o.bezierCurveTo(60, -8, 140, 8, 168, 40);
+    o.quadraticCurveTo(178, 70, 160, 90);
+    o.lineTo(150, 86); o.lineTo(144, 100);
+    o.bezierCurveTo(110, 120, 52, 92, 0, 34);
+    o.closePath(); o.fill();
+    o.strokeStyle = 'rgba(16,10,24,0.55)'; o.lineWidth = 1.4;
+    for (var v = 0; v < 5; v++) {
+      o.beginPath(); o.moveTo(4, 10 + v * 5); o.quadraticCurveTo(70, 18 + v * 14, 150 - v * 14, 36 + v * 14); o.stroke();
+    }
+    // 가장자리 이끼 술
+    o.fillStyle = '#5f7f30';
+    o.beginPath(); o.arc(166, 50, 5, 0, Math.PI * 2); o.arc(158, 84, 4, 0, Math.PI * 2); o.arc(128, 104, 4.5, 0, Math.PI * 2); o.fill();
+    ocellus(o, 112, 58, 12, VIOLET, glow * 0.8);
+    o.restore();
+
+    // ---- 앞날개
+    o.save();
+    o.translate(side * 18, 58);
+    o.scale(side, 1);
+    o.rotate(-angF);
+    o.scale(lenK, sc);
+    var fg = o.createLinearGradient(0, 0, 250, -70);
+    fg.addColorStop(0, far ? '#241c12' : '#3a2c1c');
+    fg.addColorStop(0.22, far ? '#34402a' : '#4f6236');
+    fg.addColorStop(0.55, far ? '#4a5434' : '#6f7d4a');
+    fg.addColorStop(0.82, far ? '#5a3a1c' : '#8a5a2a');
+    fg.addColorStop(1, '#3a2410');
+    o.fillStyle = fg;
+    o.beginPath();
+    o.moveTo(0, -14);
+    o.bezierCurveTo(60, -60, 150, -106, 232, -94);
+    o.quadraticCurveTo(264, -86, 252, -58);
+    o.lineTo(240, -52); o.lineTo(238, -38);
+    o.bezierCurveTo(222, -22, 200, -8, 172, 2);
+    o.lineTo(160, -2); o.lineTo(150, 8);
+    o.bezierCurveTo(100, 16, 50, 18, 0, 14);
+    o.closePath(); o.fill();
+    // 무늬: 어두운 물결 띠 + 밝은 띠
+    o.save();
+    o.clip();
+    o.strokeStyle = 'rgba(26,18,8,0.55)'; o.lineWidth = 11;
+    o.beginPath(); o.moveTo(96, -96); o.bezierCurveTo(112, -60, 100, -30, 118, 20); o.stroke();
+    o.strokeStyle = 'rgba(214,200,150,0.32)'; o.lineWidth = 5;
+    o.beginPath(); o.moveTo(150, -110); o.bezierCurveTo(166, -70, 150, -30, 170, 14); o.stroke();
+    // 녹 반점
+    o.fillStyle = 'rgba(181,84,28,0.55)';
+    o.beginPath(); o.ellipse(214, -76, 16, 9, -0.3, 0, Math.PI * 2); o.fill();
+    o.beginPath(); o.ellipse(60, -18, 12, 6, -0.4, 0, Math.PI * 2); o.fill();
+    // 이끼 가루 (밝은 점)
+    o.fillStyle = 'rgba(127,224,184,0.35)';
+    for (var d = 0; d < 9; d++) {
+      var dx = 30 + ((d * 53 + seed * 97) % 190), dy = -10 - ((d * 37) % 70) * (dx / 220);
+      o.beginPath(); o.arc(dx, dy, 2 + (d % 3), 0, Math.PI * 2); o.fill();
+    }
+    o.restore();
+    o.strokeStyle = 'rgba(20,14,8,0.5)'; o.lineWidth = 1.5;
+    for (var w = 0; w < 6; w++) {
+      o.beginPath(); o.moveTo(6, -8 + w * 4); o.quadraticCurveTo(110, -64 + w * 14, 232 - w * 12, -84 + w * 18); o.stroke();
+    }
+    // 앞 가장자리 털 + 가장자리 이끼
+    o.strokeStyle = '#2a1e10'; o.lineWidth = 3;
+    o.beginPath(); o.moveTo(0, -14); o.bezierCurveTo(60, -60, 150, -106, 232, -94); o.stroke();
+    var tufts = [[244, -72, 6], [250, -60, 5], [236, -40, 6], [210, -18, 5], [180, -2, 6], [152, 6, 4]];
+    for (var t = 0; t < tufts.length; t++) {
+      o.fillStyle = t % 2 ? '#5f7f30' : '#a8c070';
+      o.beginPath(); o.arc(tufts[t][0], tufts[t][1], tufts[t][2], 0, Math.PI * 2); o.fill();
+      o.fillStyle = '#3d6b2a';
+      o.beginPath(); o.arc(tufts[t][0] + 3, tufts[t][1] + 2, tufts[t][2] * 0.6, 0, Math.PI * 2); o.fill();
+    }
+    ocellus(o, 176, -52, 15, eyeCol, glow);
+    o.restore();
+  }
+
+  function queenAntenna(o, bx, by, side, P) {
+    var sway = Math.sin(clock * 3 + side) * 6;
+    var tx = bx + side * 74 + sway, ty = by - 70 + Math.cos(clock * 2.6) * 4 - P.head * 20;
+    var cx = bx + side * 12, cy = by - 66;
+    o.strokeStyle = '#c9b48a'; o.lineWidth = 3; o.lineCap = 'round';
+    o.beginPath(); o.moveTo(bx, by); o.quadraticCurveTo(cx, cy, tx, ty); o.stroke();
+    // 깃털 가지 (빗살)
+    o.strokeStyle = 'rgba(160,140,96,0.9)'; o.lineWidth = 1.6;
+    o.beginPath();
+    for (var i = 1; i < 15; i++) {
+      var s = i / 15, u = 1 - s;
+      var px = u * u * bx + 2 * u * s * cx + s * s * tx;
+      var py = u * u * by + 2 * u * s * cy + s * s * ty;
+      var gx = 2 * u * (cx - bx) + 2 * s * (tx - cx), gy2 = 2 * u * (cy - by) + 2 * s * (ty - cy);
+      var gl = Math.sqrt(gx * gx + gy2 * gy2) || 1;
+      var nx = -gy2 / gl, ny = gx / gl;
+      var L = 14 * (1 - s * 0.7);
+      o.moveTo(px, py); o.lineTo(px + nx * L + gx / gl * L * 0.5, py + ny * L + gy2 / gl * L * 0.5);
+      o.moveTo(px, py); o.lineTo(px - nx * L + gx / gl * L * 0.5, py - ny * L + gy2 / gl * L * 0.5);
+    }
+    o.stroke();
+    o.save();
+    o.shadowColor = TOXIC; o.shadowBlur = 8;
+    o.fillStyle = 'rgba(200,255,140,' + (0.5 + 0.4 * P.eye).toFixed(3) + ')';
+    o.beginPath(); o.arc(tx, ty, 3, 0, Math.PI * 2); o.fill();
+    o.restore();
+  }
+
+  function queenEye(o, x, y, rx, ry, P, enr) {
+    var col = enr ? PINK : TOXIC;
+    o.save();
+    o.fillStyle = '#0a1406';
+    o.beginPath(); o.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); o.fill();
+    o.shadowColor = col; o.shadowBlur = 6 + P.eye * 18;
+    var g = o.createRadialGradient(x - rx * 0.2, y - ry * 0.2, 1, x, y, rx);
+    g.addColorStop(0, enr ? '#ffe0f4' : '#f4ffd0');
+    g.addColorStop(0.35, col);
+    g.addColorStop(1, enr ? '#4a0a3a' : '#1a3a08');
+    o.globalAlpha = 0.45 + 0.55 * P.eye;
+    o.fillStyle = g;
+    o.beginPath(); o.ellipse(x, y, rx * 0.92, ry * 0.92, 0, 0, Math.PI * 2); o.fill();
+    o.globalAlpha = 1;
+    o.shadowBlur = 0;
+    // 겹눈 낱눈
+    o.fillStyle = 'rgba(0,0,0,0.28)';
+    for (var i = -2; i <= 2; i++) {
+      for (var j = -2; j <= 2; j++) {
+        if (i * i + j * j > 5) continue;
+        o.beginPath(); o.arc(x + i * rx * 0.34 + (j % 2) * rx * 0.17, y + j * ry * 0.3, 1.2, 0, Math.PI * 2); o.fill();
+      }
+    }
+    o.fillStyle = 'rgba(255,255,255,0.75)';
+    o.beginPath(); o.ellipse(x - rx * 0.35, y - ry * 0.4, rx * 0.22, ry * 0.14, -0.5, 0, Math.PI * 2); o.fill();
+    o.restore();
+  }
+
+  function drawQueenBody(o, m, P) {
+    var enr = !!m.enraged;
+    var seed = m.seed || 0.3;
+    // 기울기 (가슴 중심 기준)
+    o.save();
+    o.translate(0, 66); o.rotate(P.lean); o.translate(0, -66);
+
+    // 날개: 먼 쪽(-x) → 가까운 쪽(+x), 둘 다 몸 뒤
+    queenWings(o, -1, P, enr, seed, true);
+    queenWings(o, 1, P, enr, seed + 0.37, false);
+
+    // ---- 배 (늘어진 체절 + 포자 주머니)
+    var sway = Math.sin(clock * 2.4 + seed * 5) * 5;
+    var segs = 6;
+    for (var s = segs - 1; s >= 0; s--) {
+      var q = s / (segs - 1);
+      var sx = sway * q * q - q * 6;
+      var sy = 98 + q * 70;
+      var rx = 30 - q * 17, ry = 11 - q * 3;
+      var ag = o.createLinearGradient(sx - rx, sy, sx + rx, sy);
+      ag.addColorStop(0, '#2a2016');
+      ag.addColorStop(0.45, s % 2 ? '#5a4a30' : '#6b5a3a');
+      ag.addColorStop(1, '#2a2016');
+      o.fillStyle = ag;
+      o.beginPath(); o.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2); o.fill();
+      o.strokeStyle = 'rgba(20,12,6,0.7)'; o.lineWidth = 1.5;
+      o.beginPath(); o.ellipse(sx, sy + ry * 0.4, rx * 0.9, ry * 0.5, 0, 0.1, Math.PI - 0.1); o.stroke();
+      // 포자 주머니 (옆구리)
+      if (s > 0 && s < segs - 1) {
+        var pr = (4.5 - q * 1.5) * (1 + 0.5 * P.sac + 0.12 * Math.sin(clock * 6 + s));
+        o.save();
+        o.shadowColor = s % 2 ? VIOLET : TOXIC; o.shadowBlur = 6 + 12 * P.sac;
+        o.fillStyle = s % 2 ? '#c8a8ff' : '#c6ff7a';
+        o.beginPath(); o.arc(sx - rx * 0.86, sy, pr, 0, Math.PI * 2); o.arc(sx + rx * 0.86, sy, pr, 0, Math.PI * 2); o.fill();
+        o.restore();
+      }
+    }
+    // 배 끝 침 + 떨어지는 독
+    var tipX = sway - 6, tipY = 176;
+    o.fillStyle = '#1e160c';
+    o.beginPath(); o.moveTo(tipX - 6, tipY - 6); o.lineTo(tipX + 6, tipY - 6); o.lineTo(tipX + 1, tipY + 8); o.closePath(); o.fill();
+    var drip = (clock * 0.9 + seed) % 1;
+    o.fillStyle = 'rgba(141,255,60,' + (0.85 * (1 - drip)).toFixed(3) + ')';
+    o.beginPath(); o.arc(tipX + 1, tipY + 8 + drip * 18, 2.6, 0, Math.PI * 2); o.fill();
+
+    // ---- 다리 6개 (가슴 아래에서 매달림)
+    o.lineCap = 'round'; o.lineJoin = 'round';
+    for (var l = 0; l < 6; l++) {
+      var sd = l < 3 ? -1 : 1;
+      var li = l % 3;
+      var hx = sd * (10 + li * 8), hy = 88 + li * 4;
+      var sw = Math.sin(clock * 2.2 + l * 1.3) * 0.15 + (m.state === 'dive' ? -0.5 : 0) + P.dead * 0.6;
+      var kx = hx + sd * (26 + li * 6) * Math.cos(sw), ky = hy + 18 + Math.sin(sw) * 8;
+      var fx2 = kx + sd * (6 + li * 4), fy2 = ky + 38 + li * 8 - Math.abs(sw) * 10;
+      o.strokeStyle = '#2a2016'; o.lineWidth = 5;
+      o.beginPath(); o.moveTo(hx, hy); o.lineTo(kx, ky); o.lineTo(fx2, fy2); o.stroke();
+      o.strokeStyle = '#6b5a3a'; o.lineWidth = 1.6;
+      o.beginPath(); o.moveTo(hx, hy); o.lineTo(kx, ky); o.stroke();
+      o.strokeStyle = '#1a120a'; o.lineWidth = 2.5;
+      o.beginPath(); o.moveTo(fx2, fy2); o.lineTo(fx2 - sd * 6, fy2 + 4); o.stroke();
+    }
+
+    // ---- 가슴 (털 뭉치)
+    var tg = o.createRadialGradient(-8, 56, 6, 0, 66, 44);
+    tg.addColorStop(0, '#9a8a5e');
+    tg.addColorStop(0.55, '#5a4a30');
+    tg.addColorStop(1, '#2e2618');
+    o.fillStyle = tg;
+    o.beginPath(); o.ellipse(0, 66, 40, 36, 0, 0, Math.PI * 2); o.fill();
+    o.strokeStyle = 'rgba(190,170,120,0.55)'; o.lineWidth = 2;
+    o.beginPath();
+    for (var f = 0; f < 26; f++) {
+      var a = f / 26 * Math.PI * 2;
+      var r0 = 34 + (f % 3) * 2;
+      o.moveTo(Math.cos(a) * r0, 66 + Math.sin(a) * r0 * 0.88);
+      o.lineTo(Math.cos(a + 0.1) * (r0 + 8), 66 + Math.sin(a + 0.1) * (r0 + 8) * 0.88);
+    }
+    o.stroke();
+    moss(o, -20, 74, 9, seed);
+    moss(o, 22, 82, 7, seed + 0.4);
+    mushroom(o, 28, 52, 8, P.eye > 0.7);
+    mushroom(o, -30, 58, 6, false);
+    // 목 털 칼라
+    o.fillStyle = '#c8cca0';
+    for (var c = -3; c <= 3; c++) {
+      o.beginPath(); o.arc(c * 9 + 4, 42 + Math.abs(c) * 2, 8 - Math.abs(c) * 0.6, 0, Math.PI * 2); o.fill();
+    }
+    o.fillStyle = 'rgba(120,130,80,0.6)';
+    for (var c2 = -2; c2 <= 2; c2++) { o.beginPath(); o.arc(c2 * 10 + 4, 47, 4, 0, Math.PI * 2); o.fill(); }
+
+    // ---- 머리
+    o.save();
+    o.translate(6, 28); o.rotate(P.head); o.translate(-6, -28);
+    var hdg = o.createRadialGradient(2, 18, 3, 6, 26, 26);
+    hdg.addColorStop(0, '#7a6a48');
+    hdg.addColorStop(1, '#2e2618');
+    o.fillStyle = hdg;
+    o.beginPath(); o.ellipse(6, 26, 24, 20, 0, 0, Math.PI * 2); o.fill();
+    queenAntenna(o, -4, 10, -1, P);
+    queenAntenna(o, 16, 10, 1, P);
+    // 녹슨 철근 왕관 (끝이 독빛)
+    o.strokeStyle = '#7a3a14'; o.lineWidth = 4; o.lineCap = 'round';
+    var spikes = [[-6, 8, -12, -12], [6, 6, 6, -20], [18, 8, 24, -12]];
+    for (var k = 0; k < 3; k++) {
+      o.beginPath(); o.moveTo(spikes[k][0], spikes[k][1]); o.lineTo(spikes[k][2], spikes[k][3]); o.stroke();
+    }
+    o.strokeStyle = '#e07a35'; o.lineWidth = 1.5;
+    for (k = 0; k < 3; k++) {
+      o.beginPath(); o.moveTo(spikes[k][0] - 1, spikes[k][1]); o.lineTo(spikes[k][2] - 1, spikes[k][3] + 2); o.stroke();
+    }
+    o.fillStyle = '#b5541c';
+    o.beginPath(); o.ellipse(6, 10, 15, 4, 0, 0, Math.PI * 2); o.fill();
+    o.save();
+    o.shadowColor = enr ? PINK : TOXIC; o.shadowBlur = 10;
+    o.fillStyle = enr ? '#ffb0e8' : '#c6ff7a';
+    for (k = 0; k < 3; k++) { o.beginPath(); o.arc(spikes[k][2], spikes[k][3], 3.2, 0, Math.PI * 2); o.fill(); }
+    o.restore();
+    // 겹눈 (먼 쪽은 작게)
+    queenEye(o, -9, 27, 10, 12, P, enr);
+    queenEye(o, 22, 27, 12, 14, P, enr);
+    // 말린 주둥이 / 광선 충전구
+    o.strokeStyle = '#3a2a1a'; o.lineWidth = 2.5;
+    o.beginPath(); o.arc(7, 44, 5, 0.3, Math.PI * 1.7); o.stroke();
+    if (P.mouth > 0) {
+      o.save();
+      o.shadowColor = enr ? PINK : TOXIC; o.shadowBlur = 10 + 20 * P.mouth;
+      o.fillStyle = enr ? '#ffd0f0' : '#eaffc0';
+      o.beginPath(); o.arc(10, 36, 3 + 7 * P.mouth, 0, Math.PI * 2); o.fill();
+      o.restore();
+    }
+    o.restore();   // 머리
+    o.restore();   // lean
+  }
+
+  function drawQueen(ctx, m) {
+    var P = queenPose(m);
+    var cx = bcx(m), top = m.y;
+    var G0 = gy();
+    var sa = P.dead > 0 ? 1 - P.dead : 1;
+    // 땅 그림자 (높을수록 작고 옅게)
+    var alt = Math.max(0, G0 - (m.y + m.h));
+    var s = clamp(1 - alt / 700, 0.3, 1);
+    var shg = ctx.createRadialGradient(cx, G0, 4, cx, G0, 190 * s);
+    shg.addColorStop(0, 'rgba(0,0,0,' + (0.5 * s * sa).toFixed(3) + ')');
+    shg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shg;
+    ctx.beginPath(); ctx.ellipse(cx, G0, 190 * s, 15 * s, 0, 0, Math.PI * 2); ctx.fill();
+    // 날갯짓 바람에 일어나는 먼지
+    if (alt < 80 && sa > 0.5 && Math.random() < 0.25) particles(cx + rand(-150, 150), G0 - 4, 1, '#c9b48a', 90);
+
+    // 오라 (격노: 분홍빛)
+    var col = m.enraged ? '255,90,210' : '178,140,255';
+    var ag = ctx.createRadialGradient(cx, top + 70, 20, cx, top + 70, 260);
+    ag.addColorStop(0, 'rgba(' + col + ',' + ((m.enraged ? 0.2 : 0.1) * sa + 0.04 * Math.sin(clock * 6)).toFixed(3) + ')');
+    ag.addColorStop(1, 'rgba(' + col + ',0)');
+    ctx.fillStyle = ag;
+    ctx.beginPath(); ctx.arc(cx, top + 70, 260, 0, Math.PI * 2); ctx.fill();
+
+    // 급강하 잔상
+    if (m.state === 'dive') {
+      ctx.strokeStyle = 'rgba(178,140,255,0.4)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      var vl = Math.sqrt(m.vx * m.vx + m.vy * m.vy) || 1;
+      for (var q = 0; q < 5; q++) {
+        var ox = cx + (q - 2) * 30, oy = top + 40 + q * 26;
+        ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox - m.vx / vl * (80 + q * 16), oy - m.vy / vl * (80 + q * 16)); ctx.stroke();
+      }
+    }
+
+    var k = 1;
+    try {
+      if (ctx.getTransform) { var tr = ctx.getTransform(); k = Math.sqrt(tr.a * tr.a + tr.b * tr.b) || 1; }
+    } catch (e) { k = 1; }
+    k = clamp(Math.round(k * 4) / 4, 0.5, 2.5);
+    var cv = getQOff(k);
+    if (!cv) return;
+    var jx = 0, jy = 0;
+    if (P.jit) { jx = Math.sin(clock * 93) * P.jit; jy = Math.cos(clock * 71) * P.jit * 0.6; }
+    var o = cv.getContext('2d');
+    o.setTransform(1, 0, 0, 1, 0, 0);
+    o.globalAlpha = 1;
+    o.globalCompositeOperation = 'source-over';
+    o.clearRect(0, 0, cv.width, cv.height);
+    o.setTransform(k, 0, 0, k, QX * k, QY * k);
+    o.scale(m.facing < 0 ? -1 : 1, 1);
+    drawQueenBody(o, m, P);
+    o.setTransform(1, 0, 0, 1, 0, 0);
+    o.globalCompositeOperation = 'source-atop';
+    if (P.tele > 0) {
+      o.globalAlpha = 0.08 + 0.2 * P.tele;
+      o.fillStyle = m.enraged ? PINK : TOXIC;
+      o.fillRect(0, 0, cv.width, cv.height);
+    }
+    if (m.enraged && P.dead <= 0) {
+      o.globalAlpha = 0.07 + 0.05 * Math.sin(clock * 8);
+      o.fillStyle = PINK;
+      o.fillRect(0, 0, cv.width, cv.height);
+    }
+    if (m.hitFlash > 0) {
+      o.globalAlpha = Math.min(1, m.hitFlash / 0.15) * 0.85;
+      o.fillStyle = '#ffffff';
+      o.fillRect(0, 0, cv.width, cv.height);
+    }
+    if (P.dead > 0) {
+      o.globalAlpha = Math.min(1, P.dead * 1.2) * 0.6;
+      o.fillStyle = '#120a1a';
+      o.fillRect(0, 0, cv.width, cv.height);
+    }
+    o.globalAlpha = 1;
+    o.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = sa < 1 ? clamp(sa * 1.6, 0, 1) : 1;
+    ctx.drawImage(cv, cx - QX + jx, top - QY + jy, QW, QH);
+    ctx.globalAlpha = 1;
+
+    // 날개에서 흩날리는 포자 가루
+    if (sa > 0.3) {
+      for (var i = 0; i < 12; i++) {
+        var px = cx + Math.sin(i * 12.9898 + clock * 0.6) * 230;
+        var py = top - 40 + ((clock * 34 + i * 53) % 260);
+        var pa = 0.35 + 0.35 * Math.sin(clock * 3 + i);
+        ctx.fillStyle = (i % 2 ? 'rgba(178,140,255,' : 'rgba(198,255,122,') + (pa * sa).toFixed(3) + ')';
+        ctx.fillRect(px, py, 2.5, 2.5);
+      }
+    }
+  }
+
+  // ---- 이끼 여왕 바닥 예고 (여왕 뒤)
+  function renderQueenTele(ctx, b, G0) {
+    var cx = bcx(b);
+    var tele = 0.5 + 0.5 * Math.sin(clock * 22);
+    var dur = b.stateDur > 0 ? b.stateDur : 1;
+    var prog = clamp(1 - b.stateTimer / dur, 0, 1);
+    var col = b.enraged ? '255,90,210' : '190,150,255';
+    var W = world();
+    if (b.state === 'dive_wind' || b.state === 'dive') {
+      var zx = b.aux, zr = QUEEN.diveZone / 2;
+      var on = b.state === 'dive' ? 1 : easeOut(prog * 1.4);
+      // 내려꽂힐 기둥
+      var cg = ctx.createLinearGradient(0, G0 - 420, 0, G0);
+      cg.addColorStop(0, 'rgba(' + col + ',0)');
+      cg.addColorStop(1, 'rgba(' + col + ',' + ((0.16 + 0.18 * tele) * on).toFixed(3) + ')');
+      ctx.fillStyle = cg;
+      ctx.fillRect(zx - zr, G0 - 420, zr * 2, 420);
+      ctx.strokeStyle = 'rgba(' + col + ',' + (0.6 + 0.4 * tele).toFixed(3) + ')';
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.ellipse(zx, G0 - 2, zr * on, 16 * on, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(zx, G0 - 2, zr * 0.55 * on, 9 * on, 0, 0, Math.PI * 2); ctx.stroke();
+      // 궤적 미리보기 (점선 U자)
+      if (b.state === 'dive_wind') {
+        var sx = cx, sy = b.y;
+        var ex = clamp(zx + (zx - sx), b.w / 2, W.width - b.w / 2);
+        var by = G0 - 4 - b.h;
+        var cxp = 2 * zx - (sx + ex) / 2, cyp = 2 * by - sy;
+        ctx.setLineDash([10, 10]);
+        ctx.lineDashOffset = -clock * 60;
+        ctx.strokeStyle = 'rgba(' + col + ',' + (0.35 + 0.35 * tele).toFixed(3) + ')';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(sx, sy + b.h * 0.5); ctx.quadraticCurveTo(cxp, cyp + b.h * 0.5, ex, sy + b.h * 0.5); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    } else if (b.state === 'beam_wind') {
+      var a0 = b.ax0, a1 = b.ax1;
+      var dir = a1 >= a0 ? 1 : -1;
+      var reach = a0 + (a1 - a0) * easeOut(prog * 1.3);
+      var lg = ctx.createLinearGradient(a0, 0, a1, 0);
+      lg.addColorStop(0, 'rgba(' + col + ',' + (0.65 * (0.5 + 0.5 * tele)).toFixed(3) + ')');
+      lg.addColorStop(1, 'rgba(' + col + ',0.15)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(Math.min(a0, reach), G0 - 7, Math.abs(reach - a0), 7);
+      ctx.fillStyle = 'rgba(' + col + ',' + (0.12 + 0.1 * tele).toFixed(3) + ')';
+      ctx.fillRect(Math.min(a0, reach), G0 - QUEEN.beamH, Math.abs(reach - a0), QUEEN.beamH);
+      ctx.fillRect(Math.min(a0, reach), G0 - QUEEN.beamH, Math.abs(reach - a0), 2);
+      // 진행 방향 화살표
+      ctx.strokeStyle = 'rgba(255,230,255,' + (0.5 + 0.4 * tele).toFixed(3) + ')';
+      ctx.lineWidth = 4; ctx.lineJoin = 'round';
+      for (var ch = 0; ch < 7; ch++) {
+        var px = a0 + dir * (((clock * 240 + ch * 150) % 1050) + 20);
+        if ((px - reach) * dir > 0) continue;
+        ctx.beginPath();
+        ctx.moveTo(px - dir * 14, G0 - 70); ctx.lineTo(px, G0 - 52); ctx.lineTo(px - dir * 14, G0 - 34);
+        ctx.stroke();
+      }
+      // 조준선
+      var mp = mouthPos(b);
+      ctx.strokeStyle = 'rgba(' + col + ',' + (0.25 + 0.5 * prog).toFixed(3) + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(mp.x, mp.y); ctx.lineTo(a0, G0); ctx.stroke();
+    } else if (b.state === 'gust_wind') {
+      var R = QUEEN.gustRange * easeOut(prog * 1.2);
+      ctx.strokeStyle = 'rgba(' + col + ',' + (0.4 + 0.4 * tele).toFixed(3) + ')';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(cx, G0 - 2, R, 18, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(' + col + ',' + (0.08 + 0.08 * tele).toFixed(3) + ')';
+      ctx.fillRect(cx - R, G0 - 160, R * 2, 160);
+      ctx.strokeStyle = 'rgba(240,230,255,' + (0.5 + 0.4 * tele).toFixed(3) + ')';
+      ctx.lineWidth = 4;
+      for (var g = 0; g < 4; g++) {
+        var off = ((clock * 200 + g * 140) % 560) + 40;
+        for (var sd = -1; sd <= 1; sd += 2) {
+          var gx = cx + sd * off;
+          ctx.beginPath(); ctx.moveTo(gx - sd * 12, G0 - 60); ctx.lineTo(gx, G0 - 44); ctx.lineTo(gx - sd * 12, G0 - 28); ctx.stroke();
+        }
+      }
+    } else if (b.state === 'spore_wind') {
+      // 배의 포자 주머니가 부풀어 오름 → 포자 낙하 표식은 pod fx 가 그림
+      var sg = ctx.createRadialGradient(cx, b.y + b.h * 0.75, 4, cx, b.y + b.h * 0.75, 70);
+      sg.addColorStop(0, 'rgba(' + col + ',' + (0.35 * tele).toFixed(3) + ')');
+      sg.addColorStop(1, 'rgba(' + col + ',0)');
+      ctx.fillStyle = sg;
+      ctx.beginPath(); ctx.arc(cx, b.y + b.h * 0.75, 70, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // ---- 포자 낙하 지점 표식 / 광선 그을음 (보스 뒤)
+  function renderQueenGroundFx(ctx, f, G0) {
+    if (f.kind === 'pod') {
+      var pq = f.delay > 0 ? 0 : clamp(f.ft / f.fall, 0, 1);
+      var a = 0.5 + 0.5 * Math.sin(clock * 16 + f.x);
+      var r = QUEEN.cloudR * (1 - 0.35 * pq);
+      ctx.strokeStyle = 'rgba(190,150,255,' + (0.5 + 0.4 * a).toFixed(3) + ')';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.ellipse(f.x, G0 - 2, r, 9, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(178,140,255,' + (0.1 + 0.25 * pq).toFixed(3) + ')';
+      ctx.beginPath(); ctx.ellipse(f.x, G0 - 2, r * pq, 9 * pq, 0, 0, Math.PI * 2); ctx.fill();
+      // 생물 위험 표시 (세 갈래)
+      ctx.strokeStyle = 'rgba(198,255,122,' + (0.5 + 0.4 * a).toFixed(3) + ')';
+      ctx.lineWidth = 2;
+      for (var i = 0; i < 3; i++) {
+        var an = i * 2.094 + clock * 2;
+        ctx.beginPath(); ctx.ellipse(f.x + Math.cos(an) * 12, G0 - 2 + Math.sin(an) * 3, 7, 3, 0, 0, Math.PI * 2); ctx.stroke();
+      }
+    } else if (f.kind === 'scorch') {
+      var sa = clamp(1 - f.t / f.life, 0, 1);
+      for (var j = 0; j + 1 < f.list.length; j += 2) {
+        ctx.fillStyle = 'rgba(30,10,30,' + (0.55 * sa).toFixed(3) + ')';
+        ctx.beginPath(); ctx.ellipse(f.list[j], G0 - 1, 22, 4, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,90,210,' + (0.35 * sa).toFixed(3) + ')';
+        ctx.fillRect(f.list[j] - 10, G0 - 2, 20, 2);
+      }
+    }
+  }
+
+  // ---- 공중 fx (보스 앞)
+  function renderQueenAirFx(ctx, f, G0) {
+    var i;
+    if (f.kind === 'pod') {
+      if (f.cx == null) return;
+      ctx.save();
+      ctx.translate(f.cx, f.cy);
+      ctx.rotate(Math.sin(f.ft * 9 + f.spin) * 0.5);
+      ctx.shadowColor = f.enr ? PINK : VIOLET; ctx.shadowBlur = 14;
+      var g = ctx.createRadialGradient(-3, -4, 1, 0, 0, 14);
+      g.addColorStop(0, '#f0e4ff');
+      g.addColorStop(0.45, f.enr ? '#ff8ae0' : VIOLET);
+      g.addColorStop(1, '#3a2458');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.ellipse(0, 0, 10, 14, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(198,255,122,0.85)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, -13); ctx.quadraticCurveTo(5, 0, 0, 13); ctx.moveTo(-8, -6); ctx.quadraticCurveTo(-2, 2, -6, 10); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = 'rgba(198,255,122,0.4)';
+      for (i = 1; i < 5; i++) ctx.fillRect(f.cx - (f.vx2 || 0) * 0.008 * i - 1, f.cy - (f.vy2 || 0) * 0.008 * i - 1, 3, 3);
+    } else if (f.kind === 'cloud') {
+      var la = clamp(f.t / 0.2, 0, 1) * clamp((f.life - f.t) / 0.7, 0, 1);
+      for (i = 0; i < 6; i++) {
+        var px = f.x + Math.sin(i * 2.4 + f.t * 0.9) * f.r * 0.55;
+        var py = G0 - f.r * (0.3 + 0.18 * (i % 3)) - Math.sin(f.t * 1.3 + i) * 6;
+        var pr = f.r * (0.45 + 0.12 * (i % 3)) * (0.8 + 0.2 * clamp(f.t / 0.4, 0, 1));
+        var cg = ctx.createRadialGradient(px, py, 2, px, py, pr);
+        cg.addColorStop(0, (i % 2 ? 'rgba(198,255,122,' : 'rgba(190,150,255,') + (0.45 * la).toFixed(3) + ')');
+        cg.addColorStop(1, 'rgba(120,80,180,0)');
+        ctx.fillStyle = cg;
+        ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(240,255,200,' + (0.7 * la).toFixed(3) + ')';
+      for (i = 0; i < 8; i++) {
+        var sx = f.x + Math.sin(i * 7.1 + f.t * 2) * f.r * 0.8;
+        var sy = G0 - ((f.t * 40 + i * 23) % (f.r * 1.1));
+        ctx.fillRect(sx, sy, 2, 2);
+      }
+    } else if (f.kind === 'beam') {
+      if (f.bx == null) return;
+      var b = findBoss();
+      var sx2 = b ? mouthPos(b).x : f.x0, sy2 = b ? mouthPos(b).y : f.sy;
+      var c1 = f.enr ? '255,90,210' : '198,255,122';
+      ctx.save();
+      ctx.lineCap = 'round';
+      var fl = 0.85 + 0.15 * Math.sin(clock * 60);
+      ctx.strokeStyle = 'rgba(' + c1 + ',' + (0.22 * fl).toFixed(3) + ')'; ctx.lineWidth = 30;
+      ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(f.bx, G0); ctx.stroke();
+      ctx.shadowColor = f.enr ? PINK : TOXIC; ctx.shadowBlur = 18;
+      ctx.strokeStyle = 'rgba(' + c1 + ',' + (0.75 * fl).toFixed(3) + ')'; ctx.lineWidth = 12;
+      ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(f.bx, G0); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,240,0.95)'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(f.bx, G0); ctx.stroke();
+      ctx.shadowBlur = 0;
+      // 착탄점: 솟구치는 독 불꽃 (= 피해 범위)
+      var H = QUEEN.beamH;
+      for (i = 0; i < 7; i++) {
+        var fx = f.bx + (i - 3) * 6 + Math.sin(clock * 40 + i) * 3;
+        var fh = H * (0.45 + 0.55 * Math.abs(Math.sin(clock * 23 + i * 1.7)));
+        var tg = ctx.createLinearGradient(0, G0, 0, G0 - fh);
+        tg.addColorStop(0, 'rgba(255,255,230,0.9)');
+        tg.addColorStop(0.4, 'rgba(' + c1 + ',0.75)');
+        tg.addColorStop(1, 'rgba(' + c1 + ',0)');
+        ctx.fillStyle = tg;
+        ctx.beginPath(); ctx.moveTo(fx - 7, G0); ctx.quadraticCurveTo(fx - 4, G0 - fh * 0.6, fx, G0 - fh); ctx.quadraticCurveTo(fx + 4, G0 - fh * 0.6, fx + 7, G0); ctx.closePath(); ctx.fill();
+      }
+      var rg = ctx.createRadialGradient(f.bx, G0, 2, f.bx, G0, 60);
+      rg.addColorStop(0, 'rgba(255,255,230,0.8)');
+      rg.addColorStop(1, 'rgba(' + c1 + ',0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.ellipse(f.bx, G0, 60, 18, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else if (f.kind === 'dart' && f.delay <= 0) {
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(Math.atan2(f.vy, f.vx));
+      ctx.shadowColor = TOXIC; ctx.shadowBlur = 8;
+      ctx.fillStyle = '#c9d8a0';
+      ctx.beginPath(); ctx.moveTo(12, 0); ctx.quadraticCurveTo(0, -6, -16, -3); ctx.lineTo(-12, 0); ctx.lineTo(-16, 3); ctx.quadraticCurveTo(0, 6, 12, 0); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#4c6a28'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-16, 0); ctx.stroke();
+      ctx.fillStyle = 'rgba(198,255,122,0.35)';
+      ctx.fillRect(-40, -1.5, 24, 3);
+      ctx.restore();
+    } else if (f.kind === 'stuck') {
+      var sa = clamp(1 - f.t / f.life, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = sa;
+      ctx.translate(f.x, G0 - 2);
+      ctx.rotate(f.a);
+      ctx.fillStyle = '#c9d8a0';
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(-10, -5, -22, -3); ctx.lineTo(-22, 3); ctx.quadraticCurveTo(-10, 5, 0, 0); ctx.fill();
+      ctx.restore();
+    } else if (f.kind === 'gustfx') {
+      var gp = f.t / f.life;
+      for (i = 0; i < 3; i++) {
+        var q = gp * 1.3 - i * 0.15;
+        if (q <= 0 || q >= 1) continue;
+        var R = 40 + q * QUEEN.gustRange;
+        ctx.strokeStyle = 'rgba(230,240,255,' + (0.6 * (1 - q)).toFixed(3) + ')';
+        ctx.lineWidth = 6 * (1 - q) + 1;
+        ctx.beginPath(); ctx.arc(f.x, f.y, R, -0.7, 0.7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(f.x, f.y, R, Math.PI - 0.7, Math.PI + 0.7); ctx.stroke();
+        ctx.strokeStyle = 'rgba(198,255,122,' + (0.4 * (1 - q)).toFixed(3) + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(f.x, f.y, R * 0.8, -0.5, 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.arc(f.x, f.y, R * 0.8, Math.PI - 0.5, Math.PI + 0.5); ctx.stroke();
+      }
+    }
+  }
+
+  // ================================================================ 보스 3 '강철 지네' (권한측 AI + 공용 몸통 경로)
+  // 녹슨 강철 마디 15개가 머리의 지나간 경로를 따라오는 거대 지네. 땅속을 파고들어 목표 밑에서 솟구치고,
+  // 레일 위를 달리듯 불꽃을 튀기며 돌진(쇳물 자국), 녹은 고철을 흩뿌리고, 몸을 감았다가 꼬리를 휘두른다.
+  // 격노: 더 빠르고, 연속 잠행, 마디 드론 분리.
+  //  burrow: 파고듦 → 땅속 이동 (먼지 줄) → 표식 → 솟구침 22    rail : 레일 돌진 20 + 쇳물 띠 4/0.5s
+  //  spray : 녹은 고철 6~9개 (착탄 표식) 11 + 쇳물 웅덩이      whip : 몸 감기 → 꼬리 휘두르기 (낮은 띠, 점프) 16
+  //  drones: (격노 전용) 꼬리 마디 3개를 드론으로 분리
+
+  function centHead(m) { return { x: bcx(m) + m.facing * (m.w / 2 - 26), y: m.y + 44 }; }
+
+  // 모든 클라이언트: 머리 경로 기록 → 마디 위치 (m.segPts = [{x,y,a}], 0 = 머리)
+  // 경로는 땅 기준 높이로 저장 (창 크기가 바뀌어 groundY 가 달라져도 몸이 뜨지 않게)
+  function centTrail(m) {
+    var G0 = gy();
+    var h0 = centHead(m);
+    var h = { x: h0.x, y: G0 - h0.y };
+    if (!m.trail || !m.trail.length) {
+      m.trail = [];
+      for (var i = CENTI.segs * CENTI.segGap + 40; i >= 0; i -= 8) m.trail.push(h.x - m.facing * i, h.y);
+    }
+    var tr = m.trail;
+    var lx = tr[tr.length - 2], ly = tr[tr.length - 1];
+    var dx = h.x - lx, dy = h.y - ly;
+    if (dx * dx + dy * dy > 16) tr.push(h.x, h.y);
+    else { tr[tr.length - 2] = h.x; tr[tr.length - 1] = h.y; }
+    // 경로 길이 제한
+    var need = CENTI.segs * CENTI.segGap + 60, len = 0;
+    for (var j = tr.length - 2; j >= 2; j -= 2) {
+      len += Math.sqrt((tr[j] - tr[j - 2]) * (tr[j] - tr[j - 2]) + (tr[j + 1] - tr[j - 1]) * (tr[j + 1] - tr[j - 1]));
+      if (len > need) { tr.splice(0, j - 2); break; }
+    }
+    // 머리에서부터 경로를 따라 segGap 간격으로 마디 배치
+    var pts = [{ x: h.x, y: G0 - h.y, a: m.facing > 0 ? 0 : Math.PI }];
+    var k = tr.length - 2, px = h.x, py = h.y, acc = 0, want = CENTI.segGap;
+    while (pts.length < CENTI.segs && k >= 0) {
+      var qx = tr[k], qy = tr[k + 1];
+      var sd = Math.sqrt((qx - px) * (qx - px) + (qy - py) * (qy - py));
+      if (acc + sd >= want && sd > 0) {
+        var r = (want - acc) / sd;
+        var nx = px + (qx - px) * r, ny = py + (qy - py) * r;
+        var prev = pts[pts.length - 1];
+        pts.push({ x: nx, y: G0 - ny, a: Math.atan2(prev.y - (G0 - ny), prev.x - nx) });
+        px = nx; py = ny; acc = 0;
+      } else { acc += sd; px = qx; py = qy; k -= 2; }
+    }
+    while (pts.length < CENTI.segs) { var l2 = pts[pts.length - 1]; pts.push({ x: l2.x - m.facing * CENTI.segGap, y: l2.y, a: l2.a }); }
+    if (pts.length > 1) pts[0].a = Math.atan2(pts[0].y - pts[1].y, pts[0].x - pts[1].x);
+    m.segPts = pts;
+    m.segG0 = G0;
+  }
+
+  function centUnder(m) { return m.state === 'dig' || m.state === 'erupt_wind' || (m.state === 'intro' && !m.launched); }
+
+  function centPhysics(m, dt) {
+    var W = world(), G0 = W.groundY;
+    if (centUnder(m)) {
+      // 땅속: 머리를 땅 밑으로 끌어내림
+      m.x += m.vx * dt;
+      m.y = Math.min(G0 + 40, m.y + 700 * dt);
+      m.vy = 0; m.onGround = false;
+    } else {
+      if (m.vy < -150 && m.state !== 'erupt' && m.state !== 'intro') m.vy = -150;   // 들어 올리기 방지
+      m.vy += gravity() * dt;
+      if (m.vy > 2200) m.vy = 2200;
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      m.onGround = false;
+      if (m.y + m.h >= G0) { m.y = G0 - m.h; m.vy = 0; m.onGround = true; }
+    }
+    m.hitWall = 0;
+    if (m.x < 0) { m.x = 0; m.hitWall = -1; if (m.vx < 0) m.vx = 0; }
+    if (m.x + m.w > W.width) { m.x = W.width - m.w; m.hitWall = 1; if (m.vx > 0) m.vx = 0; }
+  }
+
+  function chooseCentiPattern(m, tgt) {
+    var dist = tgt ? Math.abs((tgt.x + tgt.w / 2) - bcx(m)) : 600;
+    var opts = [
+      ['burrow', dist > 300 ? 2.4 : 1.4],
+      ['rail', dist > 360 ? 2.6 : 0.9],
+      ['spray', dist > 250 ? 2.2 : 1.2],
+      ['whip', dist < CENTI.whipR + 40 ? 3.0 : 0.6]
+    ];
+    if (m.enraged) opts.push(['drones', (m.summonCd <= 0 && countType('drone') < 4 && aliveCount() < MAX_ALIVE + 2) ? 1.6 : 0]);
+    var total = 0, i;
+    for (i = 0; i < opts.length; i++) {
+      if (opts[i][0] === m.lastPat) opts[i][1] *= 0.2;
+      total += opts[i][1];
+    }
+    var r = Math.random() * total;
+    for (i = 0; i < opts.length; i++) { r -= opts[i][1]; if (r <= 0) return opts[i][0]; }
+    return 'rail';
+  }
+
+  function startCentiPattern(m, p, tgt) {
+    var mul = bossMul(m);
+    m.lastPat = p;
+    var tx = tgt ? tgt.x + tgt.w / 2 : bcx(m) + m.facing * 400;
+    m.facing = tx >= bcx(m) ? 1 : -1;
+    m.vx = 0;
+    if (p === 'burrow') {
+      m.slam2 = false;
+      setBossState(m, 'burrow_wind', CENTI.burrowWind * mul);
+    } else if (p === 'rail') {
+      setBossState(m, 'rail_wind', CENTI.railWind * mul);
+    } else if (p === 'spray') {
+      var dur = CENTI.sprayWind * mul;
+      setBossState(m, 'spray_wind', dur);
+      fireScrap(m, tgt, dur);
+    } else if (p === 'whip') {
+      setBossState(m, 'whip_wind', CENTI.whipWind * mul);
+    } else if (p === 'drones') {
+      m.summonCd = CENTI.droneCd;
+      setBossState(m, 'drone_wind', CENTI.droneWind);
+      var mp = mouthPos(m);
+      bossEmit({ kind: 'roar', x: Math.round(mp.x), dy: Math.round(gy() - mp.y), dir: m.facing });
+    }
+  }
+
+  function fireScrap(m, tgt, delay) {
+    var mp = mouthPos(m);
+    mp.y -= 30;   // 고개를 치켜든 위치
+    var G0 = gy();
+    var n = m.enraged ? CENTI.scrapsEnr : CENTI.scraps;
+    var baseX = tgt ? tgt.x + tgt.w / 2 : mp.x + m.facing * 450;
+    var g = gravity() * 0.5;
+    var list = [];
+    for (var i = 0; i < n; i++) {
+      var off = (i - (n - 1) / 2) * 95 + rand(-20, 20);
+      var ax = clamp(baseX + off, 20, world().width - 20);
+      var T = CENTI.scrapT * (0.8 + 0.4 * Math.random());
+      var vx = (ax - mp.x) / T;
+      var vy = ((G0 - mp.y) - 0.5 * g * T * T) / T;
+      list.push([Math.round(mp.x), Math.round(G0 - mp.y), Math.round(vx), Math.round(vy), Math.round(ax)]);
+    }
+    bossEmit({ kind: 'scrap', list: list, delay: Math.round(delay * 100) / 100, enr: m.enraged ? 1 : 0 });
+  }
+
+  function spawnDrones(m) {
+    var pts = m.segPts || [];
+    for (var i = 0; i < CENTI.drones; i++) {
+      if (aliveCount() >= MAX_ALIVE + 4) break;
+      var sp = pts[pts.length - 1 - i * 2] || { x: bcx(m) - m.facing * 200, y: gy() - 30 };
+      var d = makeMutant('drone', nextId++, clamp(sp.x - 19, 0, world().width - 38), Math.min(sp.y - 13, gy() - 26));
+      d.facing = m.facing;
+      d.vx = rand(-260, 260); d.vy = rand(-560, -380);
+      d.state = 'hurt'; d.stateTimer = 0.5;
+      Mutants.list.push(d);
+      particles(sp.x, sp.y, 14, '#ff9a3a', 260);
+      send({ t: 'mutantFx', kind: 'spawn', id: d.id, x: Math.round(sp.x), y: Math.round(sp.y), gy: gy() });
+    }
+  }
+
+  function updateCenti(m, dt) {
+    var mul = bossMul(m);
+    var W = world(), G0 = W.groundY;
+    var tgt = nearestTarget(m);
+    m.target = tgt;
+    if (m.summonCd > 0) m.summonCd -= dt;
+    var dxT = tgt ? (tgt.x + tgt.w / 2) - bcx(m) : 0;
+    m.stateTimer -= dt;
+    var done = m.stateTimer <= 0;
+
+    switch (m.state) {
+      case 'intro':
+        // 땅속에서 우르릉 → 솟구쳐 착지
+        if (!m.launched && m.stateTimer <= 1.0) {
+          m.launched = true;
+          m.y = G0 - m.h; m.vy = -1100; m.vx = m.facing * 60;
+          bossEmit({ kind: 'erupt', x: Math.round(bcx(m)), w: 300, h: 0, dmg: 0 });
+        } else if (m.launched && m.onGround && m.stateDur - m.stateTimer > 1.3) {
+          m.vx = 0;
+          bossEmit({ kind: 'land', x: Math.round(bcx(m)) });
+          setBossState(m, 'roar', BOSS.roarTime);
+          var mp0 = mouthPos(m);
+          bossEmit({ kind: 'roar', x: Math.round(mp0.x), dy: Math.round(G0 - mp0.y), dir: m.facing });
+        } else if (!m.launched && Math.random() < 0.4) {
+          particles(bcx(m) + rand(-80, 80), G0 - 4, 1, '#c9b48a', 200);
+        }
+        break;
+
+      case 'roar':
+      case 'enrage':
+        m.vx = approach(m.vx, 0, 3000, dt);
+        if (done) { setBossState(m, 'walk', 0); m.cool = 0.6; }
+        break;
+
+      case 'walk':
+      case 'idle':
+        m.state = 'walk';
+        m.cool -= dt;
+        var spd = m.enraged ? CENTI.walkEnr : CENTI.walk;
+        if (tgt) {
+          m.facing = dxT >= 0 ? 1 : -1;
+          var want = Math.abs(dxT) > m.w * 0.5 + 70 ? m.facing * spd : 0;
+          m.vx = approach(m.vx, want, 600, dt);
+          if (m.cool <= 0) startCentiPattern(m, chooseCentiPattern(m, tgt), tgt);
+        } else m.vx = approach(m.vx, 0, 600, dt);
+        break;
+
+      case 'burrow_wind':
+        m.vx = approach(m.vx, 0, 3000, dt);
+        if (done) {
+          bossEmit({ kind: 'dig', x: Math.round(centHead(m).x) });
+          m.aux = tgt ? tgt.x + tgt.w / 2 : bcx(m);
+          setBossState(m, 'dig', CENTI.digMax);
+        }
+        break;
+
+      case 'dig':
+        // 땅속 이동: 목표를 따라감 (지면 위엔 먼지 줄만)
+        if (tgt) m.aux = tgt.x + tgt.w / 2;
+        var dd = m.aux - bcx(m);
+        m.facing = dd >= 0 ? 1 : -1;
+        m.vx = clamp(dd * 4, -CENTI.digSpd, CENTI.digSpd);
+        if (Math.random() < 0.6) particles(bcx(m) + rand(-30, 30), G0 - 4, 1, '#c9b48a', 180);
+        if ((Math.abs(dd) < 30 && m.stateDur - m.stateTimer > 0.45) || done) {
+          m.vx = 0;
+          m.aux = bcx(m);
+          setBossState(m, 'erupt_wind', CENTI.eruptWind * mul * (m.slam2 ? 0.75 : 1));
+        }
+        break;
+
+      case 'erupt_wind':
+        m.vx = 0;
+        if (Math.random() < 0.5) particles(m.aux + rand(-110, 110), G0 - 4, 1, '#ff9a3a', 220);
+        if (done) {
+          bossEmit({ kind: 'erupt', x: Math.round(m.aux), w: CENTI.eruptW, h: CENTI.eruptH, dmg: CENTI.eruptDmg });
+          m.y = G0 - m.h; m.vy = CENTI.eruptVy; m.vx = m.facing * 120;
+          setBossState(m, 'erupt', 3);
+        }
+        break;
+
+      case 'erupt':
+        if (m.onGround && m.stateDur - m.stateTimer > 0.15) {
+          shake(12);
+          particles(bcx(m), G0 - 6, 20, '#c9b48a', 300);
+          if (m.enraged && !m.slam2) { m.slam2 = true; setBossState(m, 'burrow_wind', 0.4); }
+          else setBossState(m, 'recover', 0.8 * mul);
+        }
+        break;
+
+      case 'rail_wind':
+        m.vx = approach(m.vx, 0, 3000, dt);
+        if (Math.random() < 0.5) particles(centHead(m).x, G0 - 4, 2, '#ffcf7a', 260);
+        if (done) { m.aux = bcx(m); setBossState(m, 'rail', CENTI.railT); shake(8); }
+        break;
+
+      case 'rail':
+        m.vx = m.facing * (m.enraged ? CENTI.railSpdEnr : CENTI.railSpd);
+        if (Math.random() < 0.8) particles(bcx(m) - m.facing * 40, G0 - 4, 2, Math.random() < 0.5 ? '#ffcf7a' : '#ff7a2a', 300);
+        if (m.hitWall === m.facing || done) {
+          bossEmit({ kind: 'slag', x0: Math.round(m.aux), x1: Math.round(bcx(m)) });
+          if (m.hitWall === m.facing) {
+            shake(20);
+            particles(m.facing > 0 ? m.x + m.w : m.x, m.y + m.h * 0.5, 30, '#ffcf7a', 380);
+            m.vx = -m.facing * 200;
+            setBossState(m, 'stagger', 1.5);
+          } else setBossState(m, 'stagger', 0.8 * mul + 0.2);
+        }
+        break;
+
+      case 'stagger':
+        m.vx = approach(m.vx, 0, 1600, dt);
+        if (done) { setBossState(m, 'walk', 0); m.cool = CENTI.cool * mul * 0.6; }
+        break;
+
+      case 'spray_wind':
+        m.vx = approach(m.vx, 0, 3000, dt);
+        if (done) setBossState(m, 'spray', 0.5);
+        break;
+
+      case 'spray':
+        if (done) setBossState(m, 'recover', 0.6 * mul);
+        break;
+
+      case 'whip_wind':
+        m.vx = approach(m.vx, 0, 3000, dt);
+        if (done) {
+          bossEmit({ kind: 'whip', x: Math.round(bcx(m)), r: CENTI.whipR, h: CENTI.whipH, dmg: CENTI.whipDmg, dir: m.facing });
+          setBossState(m, 'whip', 0.5);
+        }
+        break;
+
+      case 'whip':
+        if (done) setBossState(m, 'recover', 0.6 * mul);
+        break;
+
+      case 'drone_wind':
+        m.vx = approach(m.vx, 0, 3000, dt);
+        if (done) { spawnDrones(m); setBossState(m, 'recover', 0.5); }
+        break;
+
+      case 'recover':
+        m.vx = approach(m.vx, 0, 2000, dt);
+        if (done) { setBossState(m, 'walk', 0); m.cool = CENTI.cool * mul; }
+        break;
+
+      default:
+        setBossState(m, 'walk', 0);
+    }
+    centPhysics(m, dt);
+  }
+
+  // 접촉: 머리(판정 상자) + 지면 위 마디 몸통 (로컬: 모든 클라이언트 / 봇: 권한측)
+  function centContact(m, dt) {
+    for (var k in m.botCd) if (m.botCd[k] > 0) m.botCd[k] -= dt;
+    if (centUnder(m) || m.state === 'intro') return;
+    var railing = m.state === 'rail';
+    var G0 = gy();
+    var head = { x: m.x + 12, y: m.y + 12, w: m.w - 24, h: m.h - 12 };
+    var pts = m.segPts || [];
+    forVictims(function (p, key, isLocal) {
+      var cd = isLocal ? m.dmgCd : (m.botCd[key] || 0);
+      if (cd > 0) return;
+      var hitHead = rectHit(head, p), hitBody = false;
+      if (!hitHead) {
+        for (var i = 3; i < pts.length; i++) {
+          var s = pts[i];
+          if (s.y > G0 + 4) continue;   // 땅속 마디
+          if (rectHit({ x: s.x - 15, y: s.y - 15, w: 30, h: 30 }, p)) { hitBody = true; break; }
+        }
+      }
+      if (!hitHead && !hitBody) return;
+      var dir = (p.x + p.w / 2) >= bcx(m) ? 1 : -1;
+      var ok;
+      if (railing && hitHead) ok = hurt(p, isLocal, CENTI.railDmg, m.facing * CENTI.railKx, CENTI.railKy);
+      else if (hitHead) ok = hurt(p, isLocal, CENTI.contactDmg, dir * TYPES.centipede.knockX, TYPES.centipede.knockY);
+      else ok = hurt(p, isLocal, CENTI.bodyDmg, dir * 320, -300);
+      if (ok || !isLocal) {
+        var c = railing ? 0.8 : CENTI.bodyCd;
+        if (isLocal) m.dmgCd = c; else m.botCd[key] = c;
+      }
+    });
+  }
+
+  // ================================================================ 보스 3 그래픽
+  var STEEL = '#2e3433', STEEL_D = '#1a1f1e', STEEL_L = '#5c6664', MOLTEN = '#ff7a2a', MOLTEN_HOT = '#ffcf7a';
+
+  function centPose(m) {
+    var dur = m.stateDur > 0 ? m.stateDur : 1;
+    var p = clamp(1 - m.stateTimer / dur, 0, 1);
+    var pulse = 0.5 + 0.5 * Math.sin(clock * 26);
+    var P = { tele: 0, glow: 0.35, jaw: 0.15 + 0.1 * Math.sin(clock * 3), rear: 0, coil: 0, dead: 0, jit: 0, gait: 1 };
+    switch (m.state) {
+      case 'burrow_wind': P.tele = pulse; P.glow = 0.7; P.rear = 0.6 * easeOut(p * 2); P.jit = 1; P.gait = 0; break;
+      case 'rail_wind': P.tele = pulse; P.glow = 0.6 + 0.4 * pulse; P.jaw = 0.5; P.jit = 1.2; P.gait = 2.5; break;
+      case 'rail': P.glow = 1; P.jaw = 0.7; P.gait = 3; break;
+      case 'spray_wind': P.tele = pulse; P.rear = 0.9 * easeOut(p * 1.6); P.jaw = 0.3 + 0.6 * p; P.glow = 0.6 + 0.4 * pulse; P.gait = 0; break;
+      case 'spray': P.rear = 0.9 * (1 - p); P.jaw = 1; P.glow = 1; P.gait = 0; break;
+      case 'whip_wind': P.tele = pulse; P.coil = easeOut(p); P.glow = 0.6; P.jit = 0.8; P.gait = 0; break;
+      case 'whip': P.coil = 1 - easeOut(p * 2); P.glow = 0.8; P.gait = 0; break;
+      case 'roar': case 'enrage': case 'drone_wind':
+        P.rear = 0.7; P.jaw = 1; P.glow = 0.7 + 0.3 * pulse; P.jit = m.state === 'enrage' ? 2.2 : 1; P.tele = m.state === 'roar' ? 0 : pulse * 0.6; P.gait = 0; break;
+      case 'stagger': P.jaw = 0.4; P.gait = 0; P.jit = 0.6; break;
+      case 'dead': P.dead = p; P.glow = 0.3 * (1 - p); P.jaw = 0.6; P.gait = 0; break;
+    }
+    if (m.enraged && m.state !== 'dead') P.glow = Math.max(P.glow, 0.55 + 0.25 * Math.sin(clock * 9));
+    return P;
+  }
+
+  function centLeg(ctx, hx, hy, fx, fy, side, col, w) {
+    // 무릎은 위·바깥쪽으로 꺾임
+    var mx = (hx + fx) / 2 + side * 6, my = Math.min(hy, fy) - 16;
+    ctx.strokeStyle = col; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(mx, my); ctx.lineTo(fx, fy); ctx.stroke();
+  }
+
+  function drawCenti(ctx, m) {
+    var pts = m.segPts;
+    if (!pts || !pts.length) return;
+    var P = centPose(m);
+    var G0 = gy();
+    var n = pts.length;
+    var enr = !!m.enraged;
+    var sa = P.dead > 0 ? clamp(1 - P.dead, 0, 1) : 1;
+    var jx = P.jit ? Math.sin(clock * 93) * P.jit : 0, jy = P.jit ? Math.cos(clock * 71) * P.jit * 0.6 : 0;
+    var flash = m.hitFlash > 0 ? Math.min(1, m.hitFlash / 0.15) : 0;
+    var glowA = P.glow;
+    var moving = clamp(Math.abs(m.vx || 0) / 160, 0, 1) * P.gait;
+    var i, s;
+    var gOff = m.segG0 != null ? G0 - m.segG0 : 0;   // 계산 뒤 groundY 가 바뀐 경우 보정
+
+    // 몸 휘기 (감기 / 고개 들기): 화면 좌표에서 오프셋
+    var Q = [];
+    for (i = 0; i < n; i++) {
+      s = pts[i];
+      var u = i / (n - 1);
+      var ox = 0, oy = 0;
+      if (P.rear > 0 && i < 6) oy -= P.rear * (6 - i) * 14;
+      if (P.coil > 0) { var ca = u * Math.PI * 1.6; ox += -m.facing * Math.sin(ca) * 40 * P.coil * u; oy -= Math.sin(u * Math.PI) * 50 * P.coil; }
+      if (P.dead > 0) oy += (G0 - 14 - s.y) * easeOut(P.dead * 1.5);
+      Q.push({ x: s.x + ox + jx, y: s.y + gOff + oy + jy, a: s.a });
+    }
+
+    ctx.save();
+    // 땅속 부분은 보이지 않게
+    ctx.beginPath(); ctx.rect(-100000, -100000, 200000, G0 + 100000 + 2); ctx.clip();
+    ctx.globalAlpha = sa < 1 ? clamp(sa * 1.6, 0, 1) : 1;
+
+    // 그림자
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    for (i = 0; i < n; i += 2) {
+      if (Q[i].y > G0 + 4) continue;
+      var hgt = clamp((G0 - Q[i].y) / 300, 0, 1);
+      ctx.beginPath(); ctx.ellipse(Q[i].x, G0, 24 * (1 - hgt * 0.6), 5, 0, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 다리 (먼 쪽 → 몸 → 가까운 쪽)
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    function legs(far) {
+      for (var li = 1; li < n; li++) {
+        var q = Q[li];
+        if (q.y > G0 + 10) continue;
+        var tap = 1 - li / n * 0.35;
+        var ph = (m.animT || clock) * 6 + li * 0.9 + (far ? Math.PI : 0);
+        var near = q.y > G0 - 70;
+        var fx, fy;
+        if (near) {
+          fx = q.x + Math.sin(ph) * 16 * moving + (far ? -6 : 6) * -m.facing;
+          fy = G0 - Math.max(0, Math.cos(ph)) * 10 * moving;
+        } else {
+          fx = q.x + (far ? -10 : 10) + Math.sin(clock * 5 + li) * 6;
+          fy = q.y + 40 * tap;
+        }
+        var hx = q.x + (far ? -4 : 4), hy = q.y + 8 * tap;
+        centLeg(ctx, hx, hy, fx, fy, far ? -1 : 1, far ? '#101413' : STEEL_D, (far ? 4 : 5) * tap);
+        if (!far) {
+          ctx.strokeStyle = 'rgba(255,122,42,' + (0.35 * glowA).toFixed(3) + ')'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo((hx + fx) / 2 + 6, Math.min(hy, fy) - 16); ctx.stroke();
+          ctx.fillStyle = '#8a949a';
+          ctx.beginPath(); ctx.arc(fx, fy, 2.2 * tap, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+    legs(true);
+
+    // 마디 (꼬리 → 머리)
+    for (i = n - 1; i >= 1; i--) {
+      s = Q[i];
+      if (s.y > G0 + 26) continue;
+      var t2 = 1 - i / n * 0.38;
+      var rx = 21 * t2, ry = 18 * t2;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.a);
+      // 마디 사이 쇳물 이음새
+      ctx.save();
+      ctx.shadowColor = enr ? '#ff3a1a' : MOLTEN; ctx.shadowBlur = 6 + 12 * glowA;
+      ctx.fillStyle = 'rgba(255,' + (enr ? 80 : 130) + ',40,' + (0.5 + 0.5 * glowA).toFixed(3) + ')';
+      ctx.beginPath(); ctx.ellipse(-rx * 0.85, 0, 5 * t2, ry * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      var g = ctx.createLinearGradient(0, -ry, 0, ry);
+      g.addColorStop(0, STEEL_L);
+      g.addColorStop(0.35, '#3e4644');
+      g.addColorStop(1, STEEL_D);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+      // 등판 (겹친 장갑)
+      ctx.fillStyle = '#4a5250';
+      ctx.beginPath(); ctx.ellipse(-2, -ry * 0.35, rx * 0.85, ry * 0.55, 0, Math.PI, 0); ctx.fill();
+      // 녹
+      if ((i * 7) % 3 !== 0) rust(ctx, rx * 0.2 - (i % 2) * 8, -ry * 0.1, 7 * t2, 4 * t2);
+      // 리벳
+      ctx.fillStyle = '#9aa4a8';
+      ctx.beginPath(); ctx.arc(-rx * 0.4, -ry * 0.55, 1.8, 0, Math.PI * 2); ctx.arc(rx * 0.4, -ry * 0.55, 1.8, 0, Math.PI * 2); ctx.fill();
+      // 등 가시 (짝수 마디)
+      if (i % 2 === 0) {
+        ctx.fillStyle = '#7a3a14';
+        ctx.beginPath(); ctx.moveTo(-4, -ry * 0.8); ctx.lineTo(4, -ry * 0.8); ctx.lineTo(-6, -ry - 12 * t2); ctx.closePath(); ctx.fill();
+      }
+      if (i % 4 === 1) moss(ctx, -rx * 0.3, -ry * 0.75, 4 * t2, i * 0.13);
+      // 아랫배 쇳물 발광
+      ctx.fillStyle = 'rgba(255,' + (enr ? 90 : 150) + ',50,' + (0.25 + 0.4 * glowA).toFixed(3) + ')';
+      ctx.fillRect(-rx * 0.6, ry * 0.45, rx * 1.2, 2.5);
+      if (P.tele > 0) { ctx.fillStyle = 'rgba(255,170,60,' + (0.12 + 0.2 * P.tele).toFixed(3) + ')'; ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+      if (flash > 0) { ctx.fillStyle = 'rgba(255,255,255,' + (0.8 * flash).toFixed(3) + ')'; ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+      if (P.dead > 0) { ctx.fillStyle = 'rgba(10,8,6,' + (0.55 * P.dead).toFixed(3) + ')'; ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+      // 꼬리 집게
+      if (i === n - 1) {
+        ctx.strokeStyle = STEEL_D; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(-rx, -3); ctx.quadraticCurveTo(-rx - 18, -10, -rx - 26, -2); ctx.moveTo(-rx, 3); ctx.quadraticCurveTo(-rx - 18, 10, -rx - 26, 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    legs(false);
+
+    // 머리
+    s = Q[0];
+    if (s.y < G0 + 30) {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      var fa = s.a;
+      var flip = Math.cos(fa) < 0 ? -1 : 1;
+      ctx.rotate(fa);
+      ctx.scale(1, flip);
+      // 더듬이 (긴 철사)
+      ctx.strokeStyle = '#8a949a'; ctx.lineWidth = 2;
+      for (var an = -1; an <= 1; an += 2) {
+        var sw = Math.sin(clock * 4 + an) * 8;
+        ctx.beginPath(); ctx.moveTo(14, -14); ctx.quadraticCurveTo(50, -40 + an * 6 + sw, 92, -26 + an * 14 + sw); ctx.stroke();
+      }
+      // 큰 턱 (집게) — jaw 로 벌어짐
+      var jaw = P.jaw;
+      ctx.fillStyle = '#3e4644';
+      for (var sd = -1; sd <= 1; sd += 2) {
+        ctx.save();
+        ctx.translate(26, sd * 8);
+        ctx.rotate(sd * (0.15 + 0.5 * jaw));
+        ctx.beginPath(); ctx.moveTo(0, -4 * sd); ctx.quadraticCurveTo(30, -2 * sd, 38, 10 * sd); ctx.lineTo(30, 6 * sd); ctx.quadraticCurveTo(18, 4 * sd, 0, 5 * sd); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#c9b48a';
+        ctx.beginPath(); ctx.arc(36, 9 * sd, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#3e4644';
+        ctx.restore();
+      }
+      // 용광로 입 (분사/돌진 시 밝게)
+      ctx.save();
+      ctx.shadowColor = enr ? '#ff3a1a' : MOLTEN; ctx.shadowBlur = 10 + 18 * glowA;
+      ctx.fillStyle = jaw > 0.5 ? MOLTEN_HOT : MOLTEN;
+      ctx.beginPath(); ctx.ellipse(28, 0, 6 + 6 * jaw, 4 + 4 * jaw, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // 머리 장갑
+      var hg = ctx.createLinearGradient(0, -26, 0, 24);
+      hg.addColorStop(0, '#6c7674');
+      hg.addColorStop(0.4, '#3e4644');
+      hg.addColorStop(1, STEEL_D);
+      ctx.fillStyle = hg;
+      ctx.beginPath();
+      ctx.moveTo(-22, -20); ctx.quadraticCurveTo(10, -32, 30, -12); ctx.lineTo(32, 10); ctx.quadraticCurveTo(8, 26, -22, 20); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#1a1f1e'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-14, -22); ctx.lineTo(-10, 20); ctx.moveTo(4, -24); ctx.lineTo(8, 22); ctx.stroke();
+      rust(ctx, -4, -12, 9, 5);
+      // 볏 (녹슨 톱날)
+      ctx.fillStyle = '#7a3a14';
+      ctx.beginPath(); ctx.moveTo(-20, -20);
+      for (var c = 0; c < 4; c++) { ctx.lineTo(-14 + c * 11, -34 - (c % 2) * 6); ctx.lineTo(-9 + c * 11, -24); }
+      ctx.closePath(); ctx.fill();
+      // 눈 무리 (불씨처럼)
+      var ec = enr ? '#ff3a1a' : '#ff9a3a';
+      ctx.save();
+      ctx.shadowColor = ec; ctx.shadowBlur = 8 + 14 * glowA;
+      ctx.fillStyle = glowA > 0.7 ? MOLTEN_HOT : ec;
+      var eyes = [[16, -12, 4], [22, -6, 3], [10, -6, 3], [18, 2, 2.4]];
+      for (var e = 0; e < eyes.length; e++) { ctx.beginPath(); ctx.arc(eyes[e][0], eyes[e][1], eyes[e][2] * (1 + 0.3 * glowA), 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+      // 깨진 전조등
+      ctx.fillStyle = 'rgba(230,240,200,' + (0.35 + 0.3 * Math.abs(Math.sin(clock * 7))).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(-2, 8, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#1a1f1e'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(-2, 8, 6, 0, Math.PI * 2); ctx.moveTo(-6, 4); ctx.lineTo(0, 10); ctx.stroke();
+      if (P.tele > 0) { ctx.fillStyle = 'rgba(255,170,60,' + (0.15 + 0.25 * P.tele).toFixed(3) + ')'; ctx.fillRect(-24, -34, 58, 60); }
+      if (flash > 0) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,255,255,' + (0.7 * flash).toFixed(3) + ')'; ctx.beginPath(); ctx.ellipse(4, 0, 30, 24, 0, 0, Math.PI * 2); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; }
+      ctx.restore();
+    }
+    // 격노 열기
+    if (enr && sa > 0.5) {
+      for (i = 0; i < n; i += 3) {
+        if (Q[i].y > G0) continue;
+        ctx.fillStyle = 'rgba(255,90,30,' + (0.25 + 0.2 * Math.sin(clock * 10 + i)).toFixed(3) + ')';
+        ctx.fillRect(Q[i].x - 1, Q[i].y - 26 - ((clock * 60 + i * 13) % 30), 2, 4);
+      }
+    }
+    ctx.restore();
+    // 레일 돌진 불꽃 꼬리
+    if (m.state === 'rail') {
+      ctx.strokeStyle = 'rgba(255,207,122,0.55)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      for (var q2 = 0; q2 < 6; q2++) {
+        var lx = bcx(m) - m.facing * (40 + q2 * 30), ly = G0 - 4 - (q2 % 3) * 4;
+        ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx - m.facing * (40 + q2 * 10), ly - 6 - q2 * 3); ctx.stroke();
+      }
+    }
+  }
+
+  // ---- 강철 지네 예고 (보스 뒤)
+  function renderCentiTele(ctx, b, G0) {
+    var tele = 0.5 + 0.5 * Math.sin(clock * 22);
+    var dur = b.stateDur > 0 ? b.stateDur : 1;
+    var prog = clamp(1 - b.stateTimer / dur, 0, 1);
+    var col = b.enraged ? '255,60,30' : '255,160,60';
+    var W = world();
+    var cx = bcx(b);
+    if (b.state === 'dig') {
+      // 땅속 이동: 솟아오르는 흙더미 + 갈라짐
+      for (var i = 0; i < 6; i++) {
+        var x = cx - b.facing * i * 26;
+        var hh = (6 - i) * 2 + Math.abs(Math.sin(clock * 20 + i)) * 4;
+        ctx.fillStyle = 'rgba(90,74,58,' + (0.9 - i * 0.12).toFixed(3) + ')';
+        ctx.beginPath(); ctx.ellipse(x, G0, 22, hh, 0, Math.PI, 0); ctx.fill();
+      }
+      ctx.strokeStyle = 'rgba(' + col + ',' + (0.4 + 0.4 * tele).toFixed(3) + ')';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(b.aux, G0 - 2, 70, 9, 0, 0, Math.PI * 2); ctx.stroke();
+    } else if (b.state === 'erupt_wind') {
+      var zw = CENTI.eruptW, zh = CENTI.eruptH;
+      var cg = ctx.createLinearGradient(0, G0 - zh, 0, G0);
+      cg.addColorStop(0, 'rgba(' + col + ',0)');
+      cg.addColorStop(1, 'rgba(' + col + ',' + (0.2 + 0.25 * tele * prog).toFixed(3) + ')');
+      ctx.fillStyle = cg;
+      ctx.fillRect(b.aux - zw / 2, G0 - zh, zw, zh);
+      ctx.strokeStyle = 'rgba(' + col + ',' + (0.6 + 0.4 * tele).toFixed(3) + ')';
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.ellipse(b.aux, G0 - 2, zw / 2, 16, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(20,12,6,0.9)'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (var c = 0; c < 8; c++) {
+        var sg = c % 2 ? 1 : -1, ln = zw * 0.5 * (0.3 + 0.7 * prog) * (0.5 + ((c * 37) % 10) / 20);
+        ctx.moveTo(b.aux, G0 - 1); ctx.lineTo(b.aux + sg * ln * 0.5, G0 - 3 - (c % 3)); ctx.lineTo(b.aux + sg * ln, G0 - 1);
+      }
+      ctx.stroke();
+    } else if (b.state === 'rail_wind') {
+      var x0 = cx + b.facing * b.w * 0.45;
+      var len = Math.min(1500, b.facing > 0 ? W.width - x0 : x0);
+      var x1 = x0 + b.facing * len * easeOut(prog * 1.5);
+      var lg = ctx.createLinearGradient(x0, 0, x1, 0);
+      lg.addColorStop(0, 'rgba(' + col + ',' + (0.45 + 0.25 * tele).toFixed(3) + ')');
+      lg.addColorStop(1, 'rgba(' + col + ',0)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(Math.min(x0, x1), G0 - b.h, Math.abs(x1 - x0), b.h);
+      // 레일 두 줄 + 튀는 전기 불꽃
+      ctx.fillStyle = 'rgba(255,230,180,' + (0.6 + 0.3 * tele).toFixed(3) + ')';
+      ctx.fillRect(Math.min(x0, x1), G0 - 6, Math.abs(x1 - x0), 2);
+      ctx.fillRect(Math.min(x0, x1), G0 - 14, Math.abs(x1 - x0), 2);
+      ctx.strokeStyle = 'rgba(255,240,200,0.85)'; ctx.lineWidth = 1.5;
+      for (var s = 0; s < 5; s++) {
+        var px = x0 + b.facing * ((clock * 700 + s * 230) % Math.max(60, len));
+        if ((px - x1) * b.facing > 0) continue;
+        ctx.beginPath(); ctx.moveTo(px, G0 - 8); ctx.lineTo(px + 6, G0 - 20); ctx.lineTo(px - 2, G0 - 26); ctx.lineTo(px + 4, G0 - 38); ctx.stroke();
+      }
+    } else if (b.state === 'whip_wind') {
+      var R = CENTI.whipR, H = CENTI.whipH;
+      ctx.fillStyle = 'rgba(' + col + ',' + (0.14 + 0.2 * tele * prog).toFixed(3) + ')';
+      ctx.fillRect(cx - R, G0 - H, R * 2, H);
+      ctx.setLineDash([12, 8]); ctx.lineDashOffset = -clock * 50;
+      ctx.strokeStyle = 'rgba(255,230,180,' + (0.5 + 0.4 * tele).toFixed(3) + ')'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx - R, G0 - H); ctx.lineTo(cx + R, G0 - H); ctx.stroke();
+      ctx.setLineDash([]);
+      // 위쪽 화살표 (점프!)
+      ctx.strokeStyle = 'rgba(255,240,200,' + (0.5 + 0.4 * tele).toFixed(3) + ')'; ctx.lineWidth = 4;
+      for (var a = -2; a <= 2; a++) {
+        if (!a) continue;
+        var ax = cx + a * R * 0.4;
+        ctx.beginPath(); ctx.moveTo(ax - 12, G0 - H - 6); ctx.lineTo(ax, G0 - H - 20); ctx.lineTo(ax + 12, G0 - H - 6); ctx.stroke();
+      }
+    } else if (b.state === 'burrow_wind') {
+      var h0 = centHead(b);
+      ctx.strokeStyle = 'rgba(' + col + ',' + (0.4 + 0.4 * tele).toFixed(3) + ')';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(h0.x + b.facing * 20, G0 - 2, 50 + 30 * prog, 8, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  // ---- 강철 지네 fx
+  function renderCentiFx(ctx, f, G0) {
+    if (f.kind === 'slag' || f.kind === 'molten') {
+      var a = clamp((f.life - f.t) / 0.6, 0, 1) * clamp(f.t / 0.1, 0, 1);
+      var x0 = f.kind === 'slag' ? f.x0 : f.x - f.w / 2, x1 = f.kind === 'slag' ? f.x1 : f.x + f.w / 2;
+      var g = ctx.createLinearGradient(0, G0 - 8, 0, G0);
+      g.addColorStop(0, 'rgba(255,207,122,' + (0.9 * a).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(255,90,30,' + (0.75 * a).toFixed(3) + ')');
+      ctx.save();
+      ctx.shadowColor = MOLTEN; ctx.shadowBlur = 12;
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.ellipse((x0 + x1) / 2, G0 - 2, (x1 - x0) / 2, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = 'rgba(255,240,200,' + (0.7 * a).toFixed(3) + ')';
+      for (var i = 0; i < 5; i++) {
+        var bx = x0 + ((i * 97 + clock * 40) % Math.max(10, x1 - x0));
+        ctx.fillRect(bx, G0 - 6 - Math.abs(Math.sin(clock * 9 + i)) * 6, 2, 2);
+      }
+    } else if (f.kind === 'scrap') {
+      // 착탄 표식
+      var ta = 0.5 + 0.5 * Math.sin(clock * 16 + f.ax);
+      ctx.strokeStyle = 'rgba(255,160,60,' + (0.5 + 0.4 * ta).toFixed(3) + ')'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.ellipse(f.ax, G0 - 2, 26 + 6 * ta, 6, 0, 0, Math.PI * 2); ctx.stroke();
+      if (f.delay > 0) return;
+      ctx.save();
+      ctx.translate(f.x, f.y); ctx.rotate(f.rot);
+      ctx.shadowColor = MOLTEN; ctx.shadowBlur = 14;
+      ctx.fillStyle = f.enr ? '#ff5a2a' : MOLTEN;
+      ctx.beginPath(); ctx.moveTo(-10, -5); ctx.lineTo(6, -9); ctx.lineTo(11, 2); ctx.lineTo(-2, 9); ctx.lineTo(-11, 4); ctx.closePath(); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = MOLTEN_HOT;
+      ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = 'rgba(255,160,60,0.45)';
+      for (var k = 1; k < 4; k++) ctx.fillRect(f.x - f.vx * 0.012 * k - 1.5, f.y - f.vy * 0.012 * k - 1.5, 3, 3);
+    } else if (f.kind === 'whipfx') {
+      var p = f.t / f.life;
+      ctx.save();
+      ctx.lineCap = 'round';
+      for (var s = 0; s < 3; s++) {
+        var q = p * 1.3 - s * 0.12;
+        if (q <= 0 || q >= 1) continue;
+        ctx.strokeStyle = 'rgba(255,220,160,' + (0.75 * (1 - q)).toFixed(3) + ')';
+        ctx.lineWidth = 8 * (1 - q) + 1;
+        var R = f.r * (0.4 + 0.6 * q);
+        ctx.beginPath(); ctx.ellipse(f.x, G0 - 30, R, 26, 0, Math.PI * 0.05, Math.PI * 0.95, true); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  // ---- 마디 드론 (원점: 발밑 중앙, +x = 앞)
+  function drawDrone(ctx, m, wind, intensity) {
+    var t = m.animT * 3;
+    ctx.lineCap = 'round';
+    for (var l = 0; l < 3; l++) {
+      var ph = t + l * 2.1;
+      ctx.strokeStyle = STEEL_D; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-8 + l * 8, -10); ctx.lineTo(-12 + l * 8 + Math.sin(ph) * 5, -18); ctx.lineTo(-10 + l * 8 + Math.sin(ph) * 7, -Math.max(0, Math.cos(ph)) * 4); ctx.stroke();
+    }
+    var g = ctx.createLinearGradient(0, -26, 0, -6);
+    g.addColorStop(0, STEEL_L); g.addColorStop(1, STEEL_D);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(0, -14, 18, 11, 0, 0, Math.PI * 2); ctx.fill();
+    rust(ctx, -4, -16, 5, 3);
+    ctx.save();
+    ctx.shadowColor = MOLTEN; ctx.shadowBlur = 6 + intensity * 12;
+    ctx.fillStyle = intensity > 0.6 ? MOLTEN_HOT : MOLTEN;
+    ctx.beginPath(); ctx.arc(12, -15, 3 + intensity * 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(-14, -9, 26, 2);
+    ctx.restore();
   }
 })();

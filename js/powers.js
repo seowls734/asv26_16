@@ -134,7 +134,7 @@
   // 발 아래 착지면 (발판 위면 발판 top, 아니면 지면)
   function surfaceBelow(cx, feetY) {
     var best = groundY();
-    var pl = (G.world && G.world.platforms) || [];
+    var pl = (G.world && !G.world.platformsLocked && G.world.platforms) || [];
     for (var i = 0; i < pl.length; i++) {
       var q = pl[i];
       if (!q || cx < q.x || cx > q.x + q.w) { continue; }
@@ -262,7 +262,7 @@
     return (fx.p && fx.p !== localP()) ? fx.p : null;
   }
   function hitPlayerBy(fx, test, dmg, knock, cx, cy) {
-    if (!fx || fx.owner !== 'remote') { return false; }
+    if (!fx || fx.owner !== 'remote' || G.bossMode) { return false; }   // 보스전: PvP 없음
     var lp = localP();
     if (!alive(lp) || !test(lp)) { return false; }
     if (!tryHit(fx, 'player')) { return false; }
@@ -293,7 +293,7 @@
     return true;
   }
   function statusPlayerBy(fx, test, kind, secs) {
-    if (!fx || fx.owner !== 'remote') { return false; }
+    if (!fx || fx.owner !== 'remote' || G.bossMode) { return false; }   // 보스전: PvP 없음
     var lp = localP();
     if (!alive(lp) || !test(lp)) { return false; }
     return applyPlayerStatus(lp, kind, secs);
@@ -462,7 +462,7 @@
       return out;
     },
     pullPlayer: function (fx, cx, cy, r, accel, dt) {
-      if (!fx || fx.owner !== 'remote' || !(dt > 0)) { return false; }
+      if (!fx || fx.owner !== 'remote' || !(dt > 0) || G.bossMode) { return false; }
       var lp = localP();
       if (!alive(lp) || !circleRect(cx, cy, r, lp)) { return false; }
       pullEntity(lp, cx, cy, +accel || 0, Math.min(dt, 0.1));
@@ -1297,7 +1297,7 @@
   // 그 그림자 효과는 그려지지 않고 시각/이벤트가 무음이며, 기술 코드가 '나(local)'에게 하는 모든 일
   // (피해·상태이상·끌어당김·직접 조작)이 V 에게 적용된다 → 모든 기술이 봇에게도 그대로 통한다.
   function castShadows(def, base, excludeId) {
-    if (!isAuthority() || !def || typeof def.cast !== 'function') { return; }
+    if (!isAuthority() || !def || typeof def.cast !== 'function' || G.bossMode) { return; }   // 보스전: 봇은 아군 → 피격 그림자 없음
     var bots = simBots();
     for (var i = 0; i < bots.length; i++) {
       var v = bots[i];

@@ -28,7 +28,10 @@
     psychograb: { element: 'psychic', elementName: '염력', name: '염력', icon: '🧠', color: '#b070ff' },
     blackhole: { element: 'void', elementName: '블랙홀', name: '블랙홀', icon: '🕳️', color: '#7a5aff' },
     timestop: { element: 'time', elementName: '시간', name: '시간 정지', icon: '⏳', color: '#7ad0ff' },
-    dragonsummon: { element: 'dragon', elementName: '용족', name: '용족 소환', icon: '🐉', color: '#ff9a3a' }
+    dragonsummon: { element: 'dragon', elementName: '용족', name: '용족 소환', icon: '🐉', color: '#ff9a3a' },
+    sum_guardian: { element: 'summon', elementName: '소환자', name: '수호 거신', icon: '🗽', color: '#5fe6d0' },
+    steel_skin: { element: 'steel', elementName: '강철', name: '강철 피부', icon: '🛡️', color: '#b8c6d4' },
+    shield_dome: { element: 'shield', elementName: '쉴드', name: '수호 돔', icon: '⛺', color: '#ffd35a' }
   };
   // 능력(원소) 폴백 목록 — Game.Skills.kits 가 없을 때
   var ELEMENT_FALLBACK = [
@@ -38,7 +41,10 @@
     ['wind', '바람', '🌪️', '#b8f0d8', 'easy', ['tornado']], ['rock', '바위', '🪨', '#b08a5a', 'easy', ['rockspike']],
     ['sand', '모래', '🏜️', '#e0b860', 'easy', ['sandstorm']], ['body', '신체강화', '💪', '#ff5050', 'easy', ['bodyboost']],
     ['psychic', '염력', '🧠', '#b070ff', 'hard', ['psychograb']], ['void', '블랙홀', '🕳️', '#7a5aff', 'hard', ['blackhole']],
-    ['time', '시간', '⏳', '#7ad0ff', 'hard', ['timestop']], ['dragon', '용족', '🐉', '#ff9a3a', 'hard', ['dragonsummon']]
+    ['time', '시간', '⏳', '#7ad0ff', 'hard', ['timestop']], ['dragon', '용족', '🐉', '#ff9a3a', 'hard', ['dragonsummon']],
+    ['summon', '소환자', '🧿', '#5fe6d0', 'hard', ['sum_drone', 'sum_wolf', 'sum_golem', 'sum_guardian']],
+    ['steel', '강철', '⚙️', '#b8c6d4', 'hard', ['steel_fist', 'steel_skin', 'steel_rail', 'steel_girder']],
+    ['shield', '쉴드', '🔰', '#ffd35a', 'hard', ['shield_bash', 'shield_reflect', 'shield_dome', 'shield_fortress']]
   ];
 
   // ===========================================================================
@@ -54,13 +60,26 @@
     { id: 'm_survive', name: '사막의 인내', desc: '혼자 연습에서 KO 없이 3분 생존 (한 출전 내)', goal: 180, reward: 'sandstorm', timed: true, onlyMode: 'practice' },
     { id: 'm_duel', name: '결투가', desc: '온라인 대전에서 다른 플레이어를 3번 KO (누적)', goal: 3, reward: 'bodyboost', onlyMode: 'online' },
     { id: 'h_flawless', hidden: true, name: '무결점', hint: '상처 하나 없는 자만이 마음으로 사물을 움직인다.',
-      desc: '피해를 한 번도 받지 않고 돌연변이 25마리 연속 처치', goal: 25, reward: 'psychograb' },
+      desc: '피해를 한 번도 받지 않고 돌연변이 25마리 연속 처치', goal: 25, reward: 'psychograb',
+      how: '돌연변이를 25마리 연속으로 처치하세요. 도중에 피해를 한 번이라도 받으면 진행도가 0으로 돌아갑니다. 경기가 바뀌어도 진행도는 이어집니다.' },
     { id: 'h_bigbang', hidden: true, name: '대폭발', hint: '한 번의 불꽃으로 무리를 삼켜라.',
-      desc: '인페르노 한 방으로 돌연변이 4마리 이상 처치', goal: 4, reward: 'blackhole' },
+      desc: '인페르노 한 방으로 돌연변이 4마리 이상 처치', goal: 4, reward: 'blackhole',
+      how: '🔥 불꽃 능력을 장착하고, 돌연변이 4마리 이상이 모였을 때 한가운데서 인페르노(I 키)를 터뜨리세요. 한 번의 인페르노로 4마리를 처치해야 합니다.' },
     { id: 'h_clock', hidden: true, name: '멈춘 시계', hint: '무너진 시계탑은 정확한 박자를 기억한다.',
-      desc: '무너진 시계탑의 시계판에 투사체를 정확히 1초 간격으로 5연속 명중', goal: 5, reward: 'timestop' },
+      desc: '무너진 시계탑의 시계판에 투사체를 정확히 1초 간격으로 5연속 명중', goal: 5, reward: 'timestop',
+      how: '시계탑은 맵 중앙의 버스·광고판 바로 왼쪽에 있습니다. 광고판 위에 올라가 시계판을 향해 화염구 같은 투사체를 쏘세요. 맞히는 간격이 1초(±0.12초)여야 하고, 5번 연속 성공해야 합니다. 박자가 어긋나면 처음부터 다시 셉니다.' },
     { id: 'h_dragon', hidden: true, name: '용의 시련', hint: '세 개의 비석, 발톱 자국의 수를 세어라.',
-      desc: '숨겨진 용 비석 3개를 발톱 수 순서대로 깨우고, 시련(90초 안에 돌연변이 15마리)을 통과', goal: 15, reward: 'dragonsummon' }
+      desc: '숨겨진 용 비석 3개를 발톱 수 순서대로 깨우고, 시련(90초 안에 돌연변이 15마리)을 통과', goal: 15, reward: 'dragonsummon',
+      how: '혼자 연습에서만 할 수 있습니다. 비석 위에 서서 아래 키(S/↓)를 2초 동안 누르면 비석이 깨어납니다. 순서는 ① 발톱 1개: 맵 맨 왼쪽 끝 바닥 → ② 발톱 2개: 왼쪽 고가도로(가장 높은 발판) 위 오른쪽 끝 → ③ 발톱 3개: 맵 맨 오른쪽 끝 바닥입니다. 순서가 틀리면 모두 꺼집니다. 셋을 다 깨우면 시련이 시작되고, 90초 안에 돌연변이 15마리를 처치해야 합니다.' },
+    { id: 'h_summon', hidden: true, name: '두 군주의 계약', hint: '녹슨 짐승과 이끼의 여왕, 둘 모두를 꺾은 자에게 영혼이 응답한다.',
+      desc: '서로 다른 보스 2종(녹슨 거수 · 이끼 여왕)을 각각 한 번씩 쓰러뜨리기 (누적, 그 보스에게 기술을 1번 이상 맞혀야 인정)', goal: 2, reward: 'sum_guardian',
+      how: '보스는 일반 경기에서 시작 90초 뒤 처음 나오고(첫 보스는 녹슨 거수), 쓰러진 뒤 180초마다 종류를 바꿔 다시 나옵니다. 「보스전」 모드에서는 5초 뒤부터 녹슨 거수 → 이끼 여왕 순서로 계속 나와 가장 빠릅니다. 보스가 살아 있는 동안 아무 기술로나 그 보스를 최소 1번 맞히고, 그 보스가 쓰러지면(누가 막타를 쳐도 됨) 그 종류가 인정됩니다. 녹슨 거수와 이끼 여왕을 모두 인정받으면 클리어. 경기가 바뀌어도 인정된 종류는 남습니다.' },
+    { id: 'h_steel', hidden: true, name: '강철 심장', hint: '쓰러지지 않는 몸은 강철로 벼려진다.',
+      desc: '한 목숨으로(KO 없이) 누적 피해 180 받기', goal: 180, reward: 'steel_skin',
+      how: '경기 중 한 번도 KO 되지 않은 채로 받은 피해의 합이 180이 되어야 합니다 (최대 체력은 100). 회복 키트(빨간 상자, +35)를 줍거나 회복 기술(풀 · 시간 · 쉴드의 수호 돔 등)로 체력을 채우며 버티세요. 보스와 돌연변이 무리 근처에서 버티면 빨리 쌓입니다. KO 되거나 새 경기를 시작하면 진행도가 0으로 돌아갑니다. 강화 혈청의 피해 감소로 줄어든 피해는 줄어든 만큼만 셉니다.' },
+    { id: 'h_shield', hidden: true, name: '이끼 수호자', hint: '이끼의 가호가 머무는 찰나에 적을 베어라.',
+      desc: '이끼 보호막 아이템을 주운 뒤 보호막이 켜진 3초 안에 돌연변이 처치하기 — 3번 (누적)', goal: 3, reward: 'shield_dome',
+      how: '아이템은 경기 시작 6초 뒤부터 10~15초마다 하늘에서 떨어집니다. 그중 초록빛의 「이끼 보호막」(3초 무적)을 주운 뒤, 3초 안에 돌연변이(종류 무관, 보스 포함)를 직접 처치(막타)하세요. 보호막 1번당 1회만 인정되고 3번 모으면 클리어. 돌연변이 무리 근처에 떨어진 보호막을 노리거나, 체력이 낮은 돌연변이를 남겨 두었다가 줍자마자 마무리하세요.' }
   ];
   var DEF_BY_ID = {};
   var REWARD_TO_MISSION = {};
@@ -330,6 +349,9 @@
   var holdLock = false;
   var trial = null;      // {t, kills, spawnT}
   var clock = { streak: 0, last: -99, flash: 0, hits: [] };
+  var bossHit = {};      // 보스 종류 → 이번 개체에 내 기술이 맞았는가 (h_summon)
+  var shieldWin = { until: -1, used: true };   // 이끼 보호막 유효 시간 (h_shield)
+  var SHIELD_WINDOW = 3.2;
 
   // ---- 이끼 뭉치: 맵 고정 8곳 (dy = 지면 위 높이, 발판 위면 발판 윗면 높이) ----
   var MOSS_SPOTS = [
@@ -418,6 +440,9 @@
     trial = null;
     clock = { streak: 0, last: -99, flash: 0, hits: [] };
     simT = 0;
+    bossHit = {};
+    shieldWin = { until: -1, used: true };
+    resetSteel();
     buildMoss();
     buildStones();
   }
@@ -487,16 +512,26 @@
     subscribed = true;
     var on = G.events.on;
     on.call(G.events, 'mutantKilled', onMutantKilled);
-    on.call(G.events, 'mutantHitByMe', function () { addProgress('m_marks', 1); });
+    on.call(G.events, 'mutantHitByMe', function (d) {
+      addProgress('m_marks', 1);
+      if (d && typeof d.type === 'string' && isBossType(d.type)) bossHit[d.type] = true;
+    });
+    on.call(G.events, 'bossDefeated', onBossDefeated);
+    on.call(G.events, 'itemPickup', function (d) {
+      if (!d || d.type !== 'shield' || d.local === false) return;
+      shieldWin = { until: simT + SHIELD_WINDOW, used: false };
+    });
     on.call(G.events, 'playerDamaged', function (d) {
       if (d && typeof d.amount === 'number' && d.amount <= 0) return;
       runT.m_cool = 0;
       resetFlawless();
+      if (d && typeof d.amount === 'number' && d.amount > 0) addSteel(d.amount);
     });
     on.call(G.events, 'playerKO', function () {
       runT.m_cool = 0;
       runT.m_survive = 0;
       resetFlawless();
+      resetSteel();
       if (trial) failTrial('KO 당했습니다');
     });
     on.call(G.events, 'oppKO', function () {
@@ -525,8 +560,44 @@
     if (st.progress) { st.progress = 0; markDirty(); }
   }
 
+  var steelAcc = 0;
+  function addSteel(n) {
+    var st = mstate('h_steel');
+    if (st.done) return;
+    steelAcc += n;
+    var v = Math.floor(steelAcc);
+    if (v >= goalOf(DEF_BY_ID.h_steel)) { complete('h_steel'); return; }
+    if (v !== st.progress) { st.progress = v; markDirty(); }
+  }
+  function resetSteel() {
+    steelAcc = 0;
+    var st = mstate('h_steel');
+    if (st.done) return;
+    if (st.progress) { st.progress = 0; markDirty(); }
+  }
+  function isBossType(t) {
+    var M = G.Mutants;
+    if (M && M.types && M.types[t]) return !!M.types[t].boss;
+    var b = M && typeof M.boss === 'function' ? M.boss() : null;
+    return !!(b && b.type === t);
+  }
+  // 보스 처치(모든 클라이언트) — 내가 그 보스를 1번 이상 맞혔으면 그 종류 인정
+  function onBossDefeated(d) {
+    var t = d && typeof d.type === 'string' ? d.type : null;
+    if (!t || !bossHit[t]) return;
+    bossHit[t] = false;
+    var st = mstate('h_summon');
+    if (st.done) return;
+    if (!st.kinds) st.kinds = [];
+    if (st.kinds.indexOf(t) >= 0) return;
+    st.kinds.push(t);
+    st.progress = Math.max(0, st.kinds.length - 1);
+    addProgress('h_summon', 1);
+  }
+
   function onMutantKilled(d) {
     d = d || {};
+    if (!shieldWin.used && simT <= shieldWin.until) { shieldWin.used = true; addProgress('h_shield', 1); }
     addProgress('m_hunt', 1);
     if (d.type === 'dog') addProgress('m_dog', 1);
     addProgress('h_flawless', 1);
@@ -1462,7 +1533,7 @@
     if (!k) return false;
     if (!Progress.isElementUnlocked(el)) {
       var md = ELEMENT_TO_MISSION[el];
-      panelMsg = { warn: true, text: '🔒 ' + k.elementName + ' 능력은 잠겨 있어요' + (md ? ' — ' + (md.hidden ? '히든 미션을 찾아 보세요' : '미션 「' + md.name + '」 클리어 시 해금') : '') };
+      panelMsg = { warn: true, text: '🔒 ' + k.elementName + ' 능력은 잠겨 있어요' + (md ? ' — ' + (md.hidden ? '히든 미션 「' + md.name + '」 클리어 시 해금 (히든 미션 탭에서 방법 확인)' : '미션 「' + md.name + '」 클리어 시 해금') : '') };
       return false;
     }
     var P = G.Powers, ok;
@@ -1533,7 +1604,9 @@
       if (md) {
         var st = mstate(md.id), goal = goalOf(md), v = Math.min(goal, st.progress || 0);
         if (md.hidden) {
-          h += '<div class="ab-lk"><b>히든 미션</b> — “' + esc(md.hint || '???') + '”</div>';
+          h += '<div class="ab-lk"><b>히든 미션: ' + esc(md.name) + '</b> — ' + esc(md.desc) +
+            '<div class="ab-bar"><i style="width:' + Math.round(v / goal * 100) + '%"></i></div>' +
+            '<div class="ab-pv">' + v + '/' + goal + '</div></div>';
         } else {
           h += '<div class="ab-lk"><b>미션: ' + esc(md.name) + '</b> — ' + esc(md.desc) +
             '<div class="ab-bar"><i style="width:' + Math.round(v / goal * 100) + '%"></i></div>' +
@@ -1561,26 +1634,23 @@
     var st = mstate(def.id);
     var goal = goalOf(def);
     var inf = rewardInfo(def);
-    if (hiddenView && !st.done) {
-      return '<div class="mp-ms hid"><div class="t"><span class="nm">??? (히든 미션)</span></div>' +
-        '<div class="hint">“' + esc(def.hint) + '”</div>' +
-        '<div class="ft"><span>보상: ???</span><span>🔒</span></div></div>';
-    }
     var v = Math.min(goal, st.progress || 0);
     var pct = st.done ? 100 : Math.round(v / goal * 100);
     var unit = def.timed ? '초' : '';
     return '<div class="mp-ms' + (st.done ? ' done' : '') + (hiddenView ? ' hid' : '') + '">' +
-      '<div class="t"><span class="nm">' + esc(def.name) + '</span>' + (st.done ? '<span class="ok">✔ 완료</span>' : '') + '</div>' +
-      '<div class="ds">' + esc(def.desc) + '</div>' +
-      (hiddenView ? '<div class="hint">“' + esc(def.hint) + '”</div>' : '') +
-      (hiddenView ? '' : '<div class="bar"><i style="width:' + pct + '%"></i></div>') +
+      '<div class="t"><span class="nm">' + (hiddenView ? '🔮 ' : '') + esc(def.name) + '</span>' + (st.done ? '<span class="ok">✔ 완료</span>' : '') + '</div>' +
+      '<div class="ds"><b>조건:</b> ' + esc(def.desc) + '</div>' +
+      (def.how ? '<div class="ds"><b>방법:</b> ' + esc(def.how) + '</div>' : '') +
+      (hiddenView && def.hint ? '<div class="hint">“' + esc(def.hint) + '”</div>' : '') +
+      '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
       '<div class="ft"><span class="rw">보상: ' + esc(inf.label) + ' 능력</span>' +
-      (hiddenView ? '' : '<span>' + (st.done ? goal : v) + '/' + goal + unit + (def.timed && !st.done ? ' (최고)' : '') + '</span>') + '</div></div>';
+      '<span>' + (st.done ? goal : v) + '/' + goal + unit + (def.timed && !st.done ? ' (최고)' : '') + '</span></div></div>';
   }
 
+  function hiddenCount() { var n = 0; for (var i = 0; i < DEFS.length; i++) if (DEFS[i].hidden) n++; return n; }
   function renderMissions(hidden) {
     var h = '<p class="mp-note">' + (hidden
-      ? '필드 어딘가에 숨겨진 시험들. 수수께끼를 풀면 강력한 능력을 얻습니다.'
+      ? '히든 미션 ' + hiddenCount() + '개의 정확한 조건과 방법입니다. 클리어하면 강력한 능력을 얻습니다. (보스가 나와 있는 동안에는 발판이 봉쇄되니, 발판이 필요한 미션은 보스가 없을 때 하세요.)'
       : '미션은 혼자 연습과 온라인 대전 모두에서 진행됩니다. 클리어하면 새 능력을 얻어요.') + '</p><div class="mp-list">';
     for (var i = 0; i < DEFS.length; i++) {
       if (!!DEFS[i].hidden !== hidden) continue;

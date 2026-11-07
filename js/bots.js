@@ -62,7 +62,34 @@
     dragon_wing: { k: 'dash', r: 330, hit: true }, dragon_breath: { k: 'fwd', min: 0, r: 260 }
   };
   var DEFAULT_SK = [{ k: 'proj', r: 450 }, { k: 'fwd', min: 40, r: 280 }, { k: 'fwd', min: 40, r: 300 }, { k: 'aoe', r: 230 }];
-  function infoOf(id, idx) { return (id && hasOwn.call(SK, id)) ? SK[id] : DEFAULT_SK[idx] || DEFAULT_SK[0]; }
+  // 표에 없는 기술: def.ai 힌트 {kind:'proj'|'melee'|'dash'|'buff'|'zone'|'summon', range} → 위 형식으로 변환 (캐시)
+  var hintCache = {};
+  function hintInfo(id) {
+    if (hasOwn.call(hintCache, id)) { return hintCache[id]; }
+    var Sk = S(), def = Sk && Sk.defs && hasOwn.call(Sk.defs, id) ? Sk.defs[id] : null;
+    var ai = def && def.ai && typeof def.ai === 'object' ? def.ai : null;
+    var out = null;
+    if (ai) {
+      var r = (typeof ai.range === 'number' && ai.range > 0) ? ai.range : 0;
+      switch (ai.kind) {
+        case 'proj': out = { k: 'proj', r: r || 500, dy: 80 }; break;
+        case 'melee': out = { k: 'melee', r: r || 110, dy: 80 }; break;
+        case 'dash': out = { k: 'dash', r: r || 280, hit: true }; break;
+        case 'buff': out = { k: 'buff' }; break;
+        case 'zone': out = { k: 'fwd', min: 0, r: r || 300, dy: 140 }; break;
+        case 'summon': out = { k: 'tgt', r: r || 520 }; break;
+        default: out = null;
+      }
+    }
+    // 힌트가 없을 때만 캐시 (기술 파일이 나중에 로드돼도 힌트를 다시 찾도록)
+    if (out || def) { hintCache[id] = out; }
+    return out;
+  }
+  function infoOf(id, idx) {
+    if (id && hasOwn.call(SK, id)) { return SK[id]; }
+    var h = id ? hintInfo(id) : null;
+    return h || DEFAULT_SK[idx] || DEFAULT_SK[0];
+  }
 
   var EASY_KITS = ['fire', 'water', 'grass', 'electric', 'ice', 'wind', 'rock', 'sand', 'body'];
 
@@ -226,6 +253,7 @@
     if (bot.invulnTimer > 0) { return false; }
     var h = H();
     if (attackerId === bot.id || attackerId === '' || attackerId === 'local') { attackerId = null; }
+    if (attackerId != null && G.bossMode) { return false; }   // 보스전: 아군끼리 피해 없음
     if (attackerId != null) { bot._lastAtk = { id: attackerId, t: G.time }; }
     amount = +amount || 0;
     if (bot.boostTimer > 0) { amount *= (h ? h.boostArmor : 0.6); }
@@ -266,6 +294,7 @@
   // ---------------------------------------------------------------- AI
   function enemiesOf(bot) {
     var P = G.players, out = [];
+    if (G.bossMode) { return out; }   // 보스전: 플레이어/봇은 모두 아군
     var all = P && typeof P.all === 'function' ? P.all() : [];
     for (var i = 0; i < all.length; i++) {
       var q = all[i];
@@ -293,7 +322,7 @@
       if (q.hp < 35) { s -= 90; }   // 마무리 노리기
       if (s < bs) { bs = s; best = q; kind = 'p'; }
     }
-    if (D.mutants) {
+    if (D.mutants || G.bossMode) {
       var ms = mutantTargets();
       for (var j = 0; j < ms.length; j++) {
         var m = ms[j];
@@ -323,6 +352,7 @@
 
   // 발판 이동: 목표가 위에 있으면 오를 발판, 아래면 내려가기
   function platNav(bot, tx, tFeet) {
+    if (G.world && G.world.platformsLocked) { return null; }   // 발판 봉쇄 중엔 오르지 않음
     var plats = (G.world && G.world.platforms) || [];
     var feet = bot.y + bot.h, bx = cx(bot);
     var best = null, bc = Infinity;
@@ -442,6 +472,19 @@
     var bx = cx(bot), by = cy(bot), feet = bot.y + bot.h;
     var WW = (G.world && G.world.width) || 4200;
 
+    if (!tgt && G.bossMode) {
+      // 보스전: 보스가 없으면 가까운 사람 동료 곁으로 (적당한 간격 유지)
+      var PL = G.players, mates = PL && typeof PL.all === "function" ? PL.all() : [], mate = null, md = Infinity;
+      for (var mi = 0; mi < mates.length; mi++) {
+        var q = mates[mi];
+        if (!q || q.isBot || q === bot || !alive(q)) { continue; }
+        var qd = Math.abs(cx(q) - bx);
+        if (qd < md) { md = qd; mate = q; }
+      }
+      var gap = 90 + (bot.slot % 4) * 45;
+      inp.dir = (mate && md > gap) ? (cx(mate) > bx ? 1 : -1) : 0;
+      return;
+    }
     if (!tgt) {
       // 상대 없음 → 배회
       ai.wander -= D.think;

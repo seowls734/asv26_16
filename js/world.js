@@ -210,7 +210,8 @@
     running: false,
     matchOver: false,
     time: 0,
-    world: { width: WORLD_W, groundY: 0, platforms: [] },
+    world: { width: WORLD_W, groundY: 0, platforms: [], platformsLocked: false },
+    bossMode: false,
     gravity: 2200,
     camera: { x: 0, y: 0 },
     keys: new Set(),
@@ -582,6 +583,8 @@
     G.Net.on('matchEnd', onRemoteMatchEnd);
     G.Net.on('bots', onRemoteBots);
     G.Net.on('score', onRemoteScore);
+    G.Net.on('lives', onRemoteLives);
+    G.Net.on('bossOver', onRemoteBossOver);
   }
 
   window.addEventListener('net:peerleave', function (e) {
@@ -773,9 +776,9 @@
   function botsActive() {
     return !!(G.Bots && typeof G.Bots.count === 'function' && G.Bots.count() > 0);
   }
-  function scoringOn() { return isOnline() || botsActive(); }
+  function scoringOn() { return isOnline() || botsActive() || !!G.bossMode; }
   // 승패/점수 권한: 온라인 호스트, 또는 연습
-  function scoreAuthority() { return isHost() || (G.mode === 'practice' && botsActive()); }
+  function scoreAuthority() { return isHost() || (G.mode === 'practice' && (botsActive() || !!G.bossMode)); }
 
   // 권한측 전용: 점수 n 추가 (보스 처치 등). 방송 + 승리 판정
   function awardPoint(id, n, reason) {
@@ -823,6 +826,7 @@
     if (victim == null || victim === myId()) return;
     var by = (m.by == null || m.by === '') ? null : m.by;
     creditKill(by, victim);
+    if (G.bossMode && isHost()) loseLife(victim);   // 손님(사람)의 KO → 공유 목숨 감소
   }
 
   function onRemoteMatchEnd(m) {
@@ -938,6 +942,8 @@
     if (!p || !p.alive || p.invulnTimer > 0 || G.matchOver) return false;
     var me = myId();
     if (attackerId != null && attackerId !== '' && attackerId !== me && attackerId !== 'local') {
+      // 보스전: PvP 없음 — 다른 플레이어/AI 동료의 공격은 무시
+      if (G.bossMode) return false;
       lastAttacker = { id: attackerId, t: G.time };
     } else {
       attackerId = null;
@@ -970,8 +976,75 @@
         if (isOnline()) netSend({ t: 'ko', by: killer });
         creditKill(killer, me);
       }
+      if (G.bossMode) loseLife(me);
     }
     return true;
+  }
+
+  // ===========================================================================
+  // 보스전 — 공유 목숨 (사람 KO 10번이면 끝) · 권한측(호스트/연습)이 세고 방송
+  // ===========================================================================
+  var BOSS_LIVES = 10;
+  var bossDefeats = 0;          // bossDefeated 이벤트 수 (Mutants.bossesKilled 가 없을 때 대비)
+  G.bossLives = { left: BOSS_LIVES, max: BOSS_LIVES };
+  G.bossResult = null;
+  if (G.events && typeof G.events.on === 'function') {
+    G.events.on('bossDefeated', function (d) {
+      if (!G.bossMode) return;
+      bossDefeats = Math.max(bossDefeats + 1, d && typeof d.count === 'number' ? d.count : 0);
+    });
+  }
+  function bossKillCount() {
+    var n = G.Mutants && typeof G.Mutants.bossesKilled === 'number' ? G.Mutants.bossesKilled : 0;
+    return Math.max(n | 0, bossDefeats);
+  }
+  function resetBossState(left) {
+    bossDefeats = 0;
+    G.bossResult = null;
+    G.bossLives.left = (typeof left === 'number' && left >= 0) ? Math.min(BOSS_LIVES, left | 0) : BOSS_LIVES;
+    hudCache.lives = null;
+  }
+  function livesAuthority() { return isHost() || G.mode === 'practice'; }
+  // 사람 플레이어(봇 제외)가 쓰러졌을 때 권한측에서 호출
+  function loseLife(victimId) {
+    if (!G.bossMode || G.matchOver || !livesAuthority()) return;
+    var v = players.byId(victimId);
+    if (v && v.isBot) return;
+    G.bossLives.left = Math.max(0, G.bossLives.left - 1);
+    if (isOnline()) netSend({ t: 'lives', left: G.bossLives.left });
+    livesChanged();
+    if (G.bossLives.left <= 0) {
+      var res = { bosses: bossKillCount(), time: Math.round(G.time * 10) / 10 };
+      if (isOnline()) netSend({ t: 'bossOver', bosses: res.bosses, time: res.time, scores: G.scores });
+      endBossMatch(res);
+    }
+  }
+  function livesChanged() {
+    hudCache.lives = null;
+    if (G.bossLives.left > 0) toast('남은 목숨 ' + G.bossLives.left + '/' + BOSS_LIVES, 'small');
+    emit('livesChanged', { left: G.bossLives.left, max: BOSS_LIVES });
+  }
+  function onRemoteLives(m) {
+    if (!m || !isOnline() || m.from !== 'h' || typeof m.left !== 'number') return;
+    if (m.left === G.bossLives.left) return;
+    G.bossLives.left = Math.max(0, Math.min(BOSS_LIVES, m.left | 0));
+    livesChanged();
+  }
+  function onRemoteBossOver(m) {
+    if (!m || !isOnline() || m.from !== 'h') return;
+    if (m.scores && typeof m.scores === 'object') applyScores(m.scores);
+    G.bossLives.left = 0;
+    hudCache.lives = null;
+    endBossMatch({ bosses: +m.bosses || 0, time: +m.time || G.time });
+  }
+  function endBossMatch(res) {
+    G.matchOver = true;
+    if (matchEndSent) return;
+    matchEndSent = true;
+    G.bossResult = res;
+    var detail = { bossMode: true, won: false, winner: null, winnerName: '', bosses: res.bosses, time: res.time };
+    emit('matchEnd', detail);
+    try { window.dispatchEvent(new CustomEvent('game:matchend', { detail: detail })); } catch (err) { /* 무시 */ }
   }
 
   function shake(amount) {
@@ -1000,7 +1073,7 @@
 
   // 호스트만 승패를 판정해 방송한다
   function checkWin() {
-    if (G.matchOver || !scoreAuthority()) return;
+    if (G.matchOver || !scoreAuthority() || G.bossMode) return;   // 보스전은 목숨으로만 끝남
     var winner = null, best = -1;
     for (var k in G.scores) {
       if (!Object.prototype.hasOwnProperty.call(G.scores, k)) continue;
@@ -1082,6 +1155,9 @@
     bindNet();
     if (!G.width) resize();
     G.mode = opts.mode || 'practice';
+    G.bossMode = !!opts.bossMode;          // 보스전 (PvP 없음 · 공유 목숨)
+    G.world.platformsLocked = false;
+    resetBossState(opts.lives);
     G.time = 0;
     G.matchOver = false;
     matchEndSent = false;
@@ -1098,7 +1174,7 @@
     resetScores(opts.scores);
     snapCamera();
     G.running = true;
-    if (G.Mutants && G.Mutants.init) G.Mutants.init();
+    if (G.Mutants && G.Mutants.init) G.Mutants.init({ mode: G.mode, bossMode: !!G.bossMode });
     if (G.Items && G.Items.init) G.Items.init();
     if (G.Missions && G.Missions.init) G.Missions.init({ mode: G.mode });
     if (G.Powers && G.Powers.init) G.Powers.init();
@@ -1121,9 +1197,11 @@
       try { G.Bots.onRestart(); } catch (err) { if (window.console) console.error('[world] Bots.onRestart', err); }
     }
     resetScores();
+    G.world.platformsLocked = false;
+    resetBossState();
     coyoteTimer = 0; jumpBufferTimer = 0;
     snapCamera();
-    if (G.Mutants && G.Mutants.init) G.Mutants.init();
+    if (G.Mutants && G.Mutants.init) G.Mutants.init({ mode: G.mode, bossMode: !!G.bossMode });
     if (G.Items && G.Items.init) G.Items.init();
     if (G.Missions && G.Missions.init) G.Missions.init({ mode: G.mode });
     if (G.Powers && G.Powers.init) G.Powers.init();
@@ -1316,8 +1394,8 @@
     p.onGround = false;
     p._plat = null;
 
-    // 한 방향 발판
-    if (p.vy >= 0 && !(p._drop > 0)) {
+    // 한 방향 발판 (보스가 살아 있는 동안 봉쇄: 착지 불가 → 지면으로 떨어진다)
+    if (p.vy >= 0 && !(p._drop > 0) && !G.world.platformsLocked) {
       var newBottom = p.y + p.h;
       var plats = G.world.platforms;
       var best = null;
@@ -1445,7 +1523,24 @@
         }
       }
     }
+    updateLivesHud();
     updateScoreboard();
+  }
+
+  // 보스전: "남은 목숨 n/10"
+  function updateLivesHud() {
+    var key = G.bossMode ? G.bossLives.left : -1;
+    if (hudCache.lives === key) return;
+    hudCache.lives = key;
+    var el = hudEl('lives-hud');
+    if (!el) return;
+    el.hidden = !G.bossMode;
+    if (!G.bossMode) return;
+    var n = hudEl('lives-n');
+    if (n) n.textContent = String(G.bossLives.left);
+    var mx = hudEl('lives-max');
+    if (mx) mx.textContent = String(G.bossLives.max);
+    if (el.classList) el.classList.toggle('low', G.bossLives.left <= 3);
   }
 
   // 모든 플레이어 점수판: 색 / 이름 / 킬 / 작은 HP 바 (킬 순)
@@ -1481,7 +1576,7 @@
       var fills = box.querySelectorAll ? box.querySelectorAll('.sb-hp > span') : [];
       for (i = 0; i < fills.length; i++) hudCache.sbFill[fills[i].getAttribute('data-id')] = { el: fills[i], v: '' };
       var goal = hudEl('sb-goal');
-      if (goal) goal.textContent = '먼저 ' + G.winScore + ' KO';
+      if (goal) goal.textContent = G.bossMode ? '보스 처치' : '먼저 ' + G.winScore + ' KO';
     }
     for (i = 0; i < all.length; i++) {
       q = all[i];
