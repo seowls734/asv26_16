@@ -617,7 +617,7 @@
   }
   function glRender(fx, ctx) {
     ctx.globalCompositeOperation = 'lighter';
-    gl(ctx, fx.x, fx.y, 30, '#4fc24a', 0.45);
+    gl(ctx, fx.x, fx.y, 40, '#7fe06a', 0.6);
     ctx.globalCompositeOperation = 'source-over';
     drawParts(ctx, fx, '#4fae3a', 'shard');
     ctx.save();
@@ -626,12 +626,12 @@
     // 잔상 날
     ctx.globalAlpha = 0.3;
     ctx.fillStyle = '#a6f07a';
-    ctx.save(); ctx.rotate(-0.5 * fx.dir); leafShape(ctx, 16, 7); ctx.fill(); ctx.restore();
+    ctx.save(); ctx.rotate(-0.5 * fx.dir); leafShape(ctx, 22, 9); ctx.fill(); ctx.restore();
     ctx.globalAlpha = 1;
     var g = ctx.createLinearGradient(0, -7, 0, 7);
     g.addColorStop(0, '#b8f58a'); g.addColorStop(0.5, '#4fc24a'); g.addColorStop(1, '#25701f');
     ctx.fillStyle = g;
-    leafShape(ctx, 16, 7); ctx.fill();
+    leafShape(ctx, 22, 9); ctx.fill();
     ctx.strokeStyle = '#1f5a1c'; ctx.lineWidth = 1.2; ctx.stroke();
     ctx.strokeStyle = 'rgba(230,255,200,0.8)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(14, 0);
@@ -1530,7 +1530,9 @@
       var q = fx.puffs[i];
       var px = r.x + ((q.u * BZ.w + fx.t * q.sp * d) % BZ.w + BZ.w) % BZ.w;
       var py = r.y + BZ.h * q.v + Math.sin(fx.t * 1.7 + q.ph) * 10;
-      gl(ctx, px, py, q.r, '#cdeeff', a * q.al);
+      ctx.globalCompositeOperation = 'lighter';
+      gl(ctx, px, py, q.r, '#9fd8ff', a * q.al * 0.6);
+      ctx.globalCompositeOperation = 'source-over';
     }
     // 바닥 서리
     var fg = ctx.createLinearGradient(0, r.y + r.h - 14, 0, r.y + r.h);
@@ -1615,13 +1617,14 @@
     { element: 'ice', elementName: '얼음', icon: '❄️', ids: ['iceshard', 'ice_wall', 'ice_nova', 'ice_blizzard'],
       meta: { color: '#7fd8ff', rarity: 'easy', desc: '냉기로 적을 느리게 하고 얼려 붙이며, 얼음 벽으로 공격을 막아 냅니다.' } }
   ];
-  var pend = G.pendingKits = Array.isArray(G.pendingKits) ? G.pendingKits : [];
-  for (var pk = 0; pk < KITS.length; pk++) {
-    var kd = KITS[pk];
-    pend.push({ element: kd.element, elementName: kd.elementName, icon: kd.icon, ids: kd.ids.slice(), meta: kd.meta,
-      args: [kd.element, kd.elementName, kd.icon, kd.ids.slice(), kd.meta], from: 'skills_kit1' });
-  }
   var kitsDone = false;
+  if (typeof S.kit !== 'function') {   // LOADOUT 의 S.kit 이 아직 없을 때만 대기열에 보관
+    var pend = G.pendingKits = (G.pendingKits && typeof G.pendingKits.push === 'function') ? G.pendingKits : [];
+    for (var pk = 0; pk < KITS.length; pk++) {
+      var kd = KITS[pk];
+      pend.push({ element: kd.element, elementName: kd.elementName, icon: kd.icon, ids: kd.ids.slice(), meta: kd.meta });
+    }
+  }
   function declareKits() {
     if (kitsDone) { return true; }
     var SK = G.Skills;
