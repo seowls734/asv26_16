@@ -66,8 +66,8 @@
       desc: '인페르노 한 방으로 돌연변이 4마리 이상 처치', goal: 4, reward: 'blackhole',
       how: '🔥 불꽃 능력을 장착하고, 돌연변이 4마리 이상이 모였을 때 한가운데서 인페르노(I 키)를 터뜨리세요. 한 번의 인페르노로 4마리를 처치해야 합니다.' },
     { id: 'h_clock', hidden: true, name: '멈춘 시계', hint: '무너진 시계탑은 정확한 박자를 기억한다.',
-      desc: '무너진 시계탑의 시계판에 투사체를 정확히 1초 간격으로 5연속 명중', goal: 5, reward: 'timestop',
-      how: '시계탑은 맵 중앙의 버스·광고판 바로 왼쪽에 있습니다. 광고판 위에 올라가 시계판을 향해 화염구 같은 투사체를 쏘세요. 맞히는 간격이 1초(±0.12초)여야 하고, 5번 연속 성공해야 합니다. 박자가 어긋나면 처음부터 다시 셉니다.' },
+      desc: '무너진 시계탑의 시계판에 투사체를 3번 맞히기', goal: 3, reward: 'timestop',
+      how: '시계탑은 맵 중앙의 버스·광고판 바로 왼쪽에 있습니다. 시계판을 향해 화염구 같은 투사체를 3번 맞히면 됩니다. 박자나 간격은 상관없고, 땅에서 쏘기 어려우면 광고판 위에 올라가서 쏘세요.' },
     { id: 'h_dragon', hidden: true, name: '용의 시련', hint: '세 개의 비석, 발톱 자국의 수를 세어라.',
       desc: '숨겨진 용 비석 3개를 발톱 수 순서대로 깨우고, 시련(90초 안에 돌연변이 15마리)을 통과', goal: 15, reward: 'dragonsummon',
       how: '혼자 연습에서만 할 수 있습니다. 비석 위에 서서 아래 키(S/↓)를 2초 동안 누르면 비석이 깨어납니다. 순서는 ① 발톱 1개: 맵 맨 왼쪽 끝 바닥 → ② 발톱 2개: 왼쪽 고가도로(가장 높은 발판) 위 오른쪽 끝 → ③ 발톱 3개: 맵 맨 오른쪽 끝 바닥입니다. 순서가 틀리면 모두 꺼집니다. 셋을 다 깨우면 시련이 시작되고, 90초 안에 돌연변이 15마리를 처치해야 합니다.' },
@@ -753,7 +753,7 @@
   // ===========================================================================
   function updateClock(dt) {
     if (clock.flash > 0) clock.flash = Math.max(0, clock.flash - dt * 2.5);
-    if (clock.streak > 0 && simT - clock.last > 1.12) clock.streak = 0;
+    // (쉬운 버전: 박자 제한 없음)
     var S = G.Skills;
     if (!S || !Array.isArray(S.fx)) return;
     var g = clockGeom();
@@ -771,13 +771,13 @@
 
   function clockHit(x, y) {
     var dtHit = simT - clock.last;
-    if (clock.streak > 0 && Math.abs(dtHit - 1.0) <= 0.12) clock.streak++;
-    else clock.streak = 1;
+    clock.streak++;
+    // 간격 상관없이 누적
     clock.last = simT;
     clock.flash = 1;
     particles(x, y, 12, '#ffd34a', 260);
     particles(x, y, 6, '#c08a3a', 160);
-    if (clock.streak >= 5) {
+    if (clock.streak >= 3) {
       clock.streak = 0;
       complete('h_clock');
     }
@@ -1068,7 +1068,7 @@
     c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.cos(hourA) * R * 0.5, cy + Math.sin(hourA) * R * 0.5); c.stroke();
     c.lineWidth = 2.2;
     c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.cos(minA) * R * 0.78, cy + Math.sin(minA) * R * 0.78); c.stroke();
-    var secA = (done ? 0 : clock.streak) / 5 * Math.PI * 2 - Math.PI / 2;
+    var secA = (done ? 0 : clock.streak) / 3 * Math.PI * 2 - Math.PI / 2;
     c.strokeStyle = done ? '#ffb020' : '#8a2a1a';
     c.lineWidth = 1.2;
     c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.cos(secA) * R * 0.86, cy + Math.sin(secA) * R * 0.86); c.stroke();
@@ -1077,7 +1077,7 @@
     c.beginPath(); c.arc(cx, cy, 3, 0, Math.PI * 2); c.fill();
 
     // 금빛 표시 5개 (시계판 위 호)
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 3; i++) {
       var la = Math.PI * (1.15 + i * 0.175);
       var lx = cx + Math.cos(la) * (R + 12), ly = cy + Math.sin(la) * (R + 12) + 2;
       var lit = done || i < clock.streak;
