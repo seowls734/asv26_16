@@ -151,14 +151,22 @@
   var bufW = 1, bufH = 1;    // 오버레이 백버퍼 크기 (기기 픽셀)
 
   // ---- 플레이어 레지스트리 ----
+  // pov: 권한측에서 봇 시점으로 기술을 시뮬레이션하는 동안 local 을 그 봇으로 잠시 바꾼다 (withPov).
+  //      그동안 list()/byId() 는 그 봇을 제외하고 진짜 로컬 플레이어를 포함한다.
+  var povReal = null;   // pov 중 진짜 로컬 플레이어
+  var muteDepth = 0;    // >0 이면 파티클/흔들림/토스트/이벤트 무음 (그림자 시뮬레이션)
+  var povParticles = [];
   var players = {
     local: null,
     others: {},
+    pov: null,
     list: function () {
       var out = [];
+      var pv = players.pov;
       for (var k in players.others) {
-        if (Object.prototype.hasOwnProperty.call(players.others, k) && players.others[k]) out.push(players.others[k]);
+        if (Object.prototype.hasOwnProperty.call(players.others, k) && players.others[k] && players.others[k] !== pv) out.push(players.others[k]);
       }
+      if (pv && povReal) out.unshift(povReal);
       return out;
     },
     all: function () {
@@ -169,7 +177,27 @@
     byId: function (id) {
       if (id == null) return null;
       if (players.local && players.local.id === id) return players.local;
+      if (players.pov && povReal && povReal.id === id) return povReal;
       return Object.prototype.hasOwnProperty.call(players.others, id) ? (players.others[id] || null) : null;
+    },
+    // 진짜 로컬 플레이어 (pov 중에도)
+    real: function () { return players.pov ? povReal : players.local; },
+    // p 의 시점으로 fn 실행: local = p, 시각/이벤트 무음, G.particles 는 임시 배열
+    withPov: function (p, fn) {
+      if (!p || typeof fn !== 'function') return undefined;
+      if (players.pov === p || (!players.pov && p === players.local)) return fn();
+      var prevLocal = players.local, prevPov = players.pov, prevReal = povReal, prevParts = G.particles;
+      if (!prevPov) povReal = prevLocal;
+      players.local = p; players.pov = p;
+      muteDepth++;
+      povParticles.length = 0;
+      G.particles = povParticles;
+      try { return fn(); }
+      finally {
+        muteDepth--;
+        G.particles = prevParts;
+        players.local = prevLocal; players.pov = prevPov; povReal = prevReal;
+      }
     }
   };
 
@@ -203,10 +231,30 @@
     damagePlayer: damagePlayer,
     shake: shake,
     toast: toast,
-    rectHit: rectHit
+    rectHit: rectHit,
+    stepPlayer: stepPlayer,       // (p, input, dt) — 입력 기반 물리 (로컬 플레이어와 봇 공용)
+    awardPoint: awardPoint,       // (id, n, reason) — 권한측 전용 점수 추가
+    fxMuted: function () { return muteDepth > 0; },
+    unmuted: function (fn) {      // pov 무음 중에도 시각효과/이벤트를 내야 할 때
+      var d = muteDepth; muteDepth = 0;
+      try { return fn(); } finally { muteDepth = d; }
+    }
   });
 
+  // 그림자 시뮬레이션(pov) 중에는 이벤트 버스도 무음 (미션/킬피드 중복 방지)
+  (function wrapEvents() {
+    var ev = G.events;
+    if (!ev || typeof ev.emit !== 'function' || ev._povWrapped) return;
+    var orig = ev.emit;
+    ev.emit = function (name, data) {
+      if (muteDepth > 0) return;
+      return orig.call(ev, name, data);
+    };
+    ev._povWrapped = true;
+  })();
+
   // 내부 상태
+  var realParticles = G.particles;
   var loopStarted = false;
   var lastTs = 0;
   var bgTime = 0;
@@ -532,6 +580,8 @@
     G.Net.on('state', onRemoteState);
     G.Net.on('ko', onRemoteKo);
     G.Net.on('matchEnd', onRemoteMatchEnd);
+    G.Net.on('bots', onRemoteBots);
+    G.Net.on('score', onRemoteScore);
   }
 
   window.addEventListener('net:peerleave', function (e) {
@@ -544,7 +594,7 @@
     var keep = {};
     for (var i = 0; i < peers.length; i++) if (peers[i]) keep[peers[i].id] = 1;
     var os = players.list();
-    for (var k = 0; k < os.length; k++) if (!keep[os[k].id]) removeOther(os[k].id);
+    for (var k = 0; k < os.length; k++) if (!os[k].isBot && !keep[os[k].id]) removeOther(os[k].id);
   });
 
   function isOnline() { return G.mode === 'host' || G.mode === 'guest'; }
@@ -608,7 +658,11 @@
     if (id == null || id === myId()) return;
     var r = players.others[id];
     if (!r) r = addOther(id);
-    var gyOff = (typeof m.gy === 'number') ? (G.world.groundY - m.gy) : 0;
+    applyState(r, m, (typeof m.gy === 'number') ? (G.world.groundY - m.gy) : 0);
+  }
+
+  // 원격(또는 호스트가 보낸 봇) 상태를 플레이어 객체에 적용 — 보간 목표 설정
+  function applyState(r, m, gyOff) {
     var tx = +m.x || 0, ty = (+m.y || 0) + gyOff;
     var wasAlive = r.alive;
     var nowAlive = m.alive !== false;
@@ -630,11 +684,119 @@
     if (typeof m.energy === 'number') r.energy = m.energy;
     if (typeof m.anim === 'string') r.anim = m.anim;
     if (typeof m.inv === 'number') r.invulnTimer = m.inv;
+    if (typeof m.boost === 'number') r.boostTimer = m.boost;
     r.alive = nowAlive;
     if (!firstState) {
       if (wasAlive && !nowAlive) koBurst(r);
       if (!wasAlive && nowAlive) respawnBurst(r);
     }
+  }
+
+  // ---- 봇 (호스트가 시뮬레이션, 20Hz 묶음 방송) ----
+  function setPlayerSlot(p, slot) {
+    slot = ((slot | 0) % 8 + 8) % 8;
+    var info = slotInfo(slot);
+    p.slot = slot;
+    p.pal = info.pal;
+    p.color = info.pal.cloak;
+    p.name = p.isBot ? 'AI ' + info.name : info.name;
+    p._spawnX = SLOT_SPAWN_X[slot];
+    hudCache.sbKey = null;
+  }
+
+  // 봇 플레이어 객체 생성 + 등록 (권한측 봇 생성, 게스트의 봇 표시 공용)
+  function addBotPlayer(id, slot, sim) {
+    var p = players.others[id];
+    if (!p) {
+      p = makePlayer(false, slot, id);
+      p.isBot = true;
+      players.others[id] = p;
+      if (!(id in G.scores)) G.scores[id] = 0;
+      setPlayerSlot(p, slot);
+      emit('playerJoin', { id: id, name: p.name, slot: p.slot, bot: true });
+    } else if (p.slot !== slot) {
+      setPlayerSlot(p, slot);
+    }
+    p.isBot = true;
+    p._sim = !!sim;
+    if (sim) p._hasState = true;
+    hudCache.sbKey = null;
+    return p;
+  }
+
+  function onRemoteBots(m) {
+    if (!m || G.mode !== 'guest' || !G.running) return;
+    if (m.from != null && m.from !== 'h') return;
+    var list = Array.isArray(m.list) ? m.list : [];
+    var gyOff = (typeof m.gy === 'number') ? (G.world.groundY - m.gy) : 0;
+    var seen = {};
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i];
+      if (!s || typeof s.id !== 'string' || s.id === myId()) continue;
+      seen[s.id] = 1;
+      var r = addBotPlayer(s.id, s.slot, false);
+      if (typeof s.el === 'string') r.element = s.el;
+      applyState(r, s, gyOff);
+    }
+    var os = players.list();
+    for (var k = 0; k < os.length; k++) if (os[k].isBot && !seen[os[k].id]) removeOther(os[k].id);
+  }
+
+  function botStateList() {
+    var out = [];
+    var os = players.list();
+    for (var i = 0; i < os.length; i++) {
+      var p = os[i];
+      if (!p.isBot || !p._sim) continue;
+      out.push({
+        id: p.id, slot: p.slot, el: p.element || null,
+        x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10,
+        vx: Math.round(p.vx), vy: Math.round(p.vy),
+        facing: p.facing, onGround: p.onGround,
+        hp: Math.round(p.hp * 10) / 10, energy: Math.round(p.energy), alive: p.alive, anim: p.anim,
+        inv: p.invulnTimer > 0.3 ? Math.round(p.invulnTimer * 10) / 10 : 0,
+        boost: p.boostTimer > 0 ? Math.round(p.boostTimer * 10) / 10 : 0
+      });
+    }
+    return out;
+  }
+
+  var botsSentAny = false;
+  function sendBots() {
+    var list = botStateList();
+    if (!list.length && !botsSentAny) return;
+    botsSentAny = list.length > 0;
+    netSend({ t: 'bots', list: list, gy: G.world.groundY });
+  }
+
+  // 봇이 있는 연습(AI 대전) — 점수판/승리 판정 사용
+  function botsActive() {
+    return !!(G.Bots && typeof G.Bots.count === 'function' && G.Bots.count() > 0);
+  }
+  function scoringOn() { return isOnline() || botsActive(); }
+  // 승패/점수 권한: 온라인 호스트, 또는 연습
+  function scoreAuthority() { return isHost() || (G.mode === 'practice' && botsActive()); }
+
+  // 권한측 전용: 점수 n 추가 (보스 처치 등). 방송 + 승리 판정
+  function awardPoint(id, n, reason) {
+    if (id == null || !(isHost() || G.mode === 'practice') || G.matchOver) return false;
+    n = (typeof n === 'number' && isFinite(n)) ? n : 1;
+    G.scores[id] = (G.scores[id] || 0) + n;
+    syncScore();
+    hudCache.sbKey = null;
+    if (isOnline()) netSend({ t: 'score', id: id, n: n, reason: reason || null, total: G.scores[id] });
+    emit('score', { id: id, n: n, reason: reason || null, name: playerName(id) });
+    checkWin();
+    return true;
+  }
+
+  function onRemoteScore(m) {
+    if (!m || !isOnline() || G.matchOver || m.from !== 'h' || m.id == null) return;
+    if (typeof m.total === 'number') G.scores[m.id] = m.total;
+    else G.scores[m.id] = (G.scores[m.id] || 0) + (+m.n || 0);
+    syncScore();
+    hudCache.sbKey = null;
+    emit('score', { id: m.id, n: +m.n || 0, reason: m.reason || null, name: playerName(m.id) });
   }
 
   // 점수 1점 추가 (모든 클라이언트가 같은 ko 메시지로 동일하게 계산)
@@ -656,6 +818,8 @@
   function onRemoteKo(m) {
     if (!m || !isOnline() || !G.running || G.matchOver) return;
     var victim = m.from;
+    // 호스트는 봇의 KO 를 victim 필드로 알린다
+    if (m.victim != null && m.victim !== '' && m.from === 'h') victim = m.victim;
     if (victim == null || victim === myId()) return;
     var by = (m.by == null || m.by === '') ? null : m.by;
     creditKill(by, victim);
@@ -701,8 +865,10 @@
   }
 
   function pushParticle(p) {
-    if (G.particles.length >= MAX_PARTICLES) G.particles.shift();
-    G.particles.push(p);
+    if (muteDepth > 0) return;
+    var arr = (G.particles === povParticles) ? realParticles : G.particles;
+    if (arr.length >= MAX_PARTICLES) arr.shift();
+    arr.push(p);
   }
 
   function spawnParticles(x, y, count, color, speed) {
@@ -767,6 +933,8 @@
   // attackerId: 나에게 피해를 준 플레이어의 net id (돌연변이/환경은 생략)
   function damagePlayer(amount, kx, ky, attackerId) {
     var p = G.players.local;
+    // 봇 시점 시뮬레이션(pov) 중이면 그 봇이 맞은 것
+    if (p && p.isBot) return G.Bots && typeof G.Bots.damage === 'function' ? G.Bots.damage(p, amount, kx, ky, attackerId) : false;
     if (!p || !p.alive || p.invulnTimer > 0 || G.matchOver) return false;
     var me = myId();
     if (attackerId != null && attackerId !== '' && attackerId !== me && attackerId !== 'local') {
@@ -798,8 +966,8 @@
       lastAttacker = null;
       toast('KO!');
       emit('playerKO', { by: killer });
-      if (isOnline()) {
-        netSend({ t: 'ko', by: killer });
+      if (scoringOn()) {
+        if (isOnline()) netSend({ t: 'ko', by: killer });
         creditKill(killer, me);
       }
     }
@@ -807,11 +975,13 @@
   }
 
   function shake(amount) {
+    if (muteDepth > 0) return;
     shakeAmt = Math.min(40, Math.max(shakeAmt, 0) + (amount || 0));
   }
 
   // kind === 'small' → 작은 알림 (입/퇴장 등)
   function toast(text, kind) {
+    if (muteDepth > 0) return;
     var el = document.getElementById ? document.getElementById('toast') : null;
     if (!el) return;
     el.textContent = text;
@@ -830,14 +1000,14 @@
 
   // 호스트만 승패를 판정해 방송한다
   function checkWin() {
-    if (!isOnline() || G.matchOver || !isHost()) return;
+    if (G.matchOver || !scoreAuthority()) return;
     var winner = null, best = -1;
     for (var k in G.scores) {
       if (!Object.prototype.hasOwnProperty.call(G.scores, k)) continue;
       if (G.scores[k] >= G.winScore && G.scores[k] > best) { best = G.scores[k]; winner = k; }
     }
     if (winner == null) return;
-    netSend({ t: 'matchEnd', winner: winner, scores: G.scores });
+    if (isOnline()) netSend({ t: 'matchEnd', winner: winner, scores: G.scores });
     endMatch(winner);
   }
 
@@ -921,6 +1091,10 @@
     coyoteTimer = 0; jumpBufferTimer = 0; stateTimer = 0;
     G.keys.clear();
     createPlayers();
+    botsSentAny = false;
+    if (G.Bots && typeof G.Bots.onStart === 'function') {
+      try { G.Bots.onStart(); } catch (err) { if (window.console) console.error('[world] Bots.onStart', err); }
+    }
     resetScores(opts.scores);
     snapCamera();
     G.running = true;
@@ -943,6 +1117,9 @@
     resetPlayer(G.players.local);
     var os = players.list();
     for (var i = 0; i < os.length; i++) resetPlayer(os[i]);
+    if (G.Bots && typeof G.Bots.onRestart === 'function') {
+      try { G.Bots.onRestart(); } catch (err) { if (window.console) console.error('[world] Bots.onRestart', err); }
+    }
     resetScores();
     coyoteTimer = 0; jumpBufferTimer = 0;
     snapCamera();
@@ -973,6 +1150,10 @@
 
     // 1. 로컬 / 원격 / 파티클 / 카메라
     updateLocal(dt);
+    // 봇 (권한측 시뮬레이션: AI + 같은 물리)
+    if (G.Bots && typeof G.Bots.update === 'function') {
+      try { G.Bots.update(dt); } catch (err) { if (window.console) console.error('[world] Bots.update', err); }
+    }
     updateRemote(dt);
     updateParticles(dt);
     updateCamera(dt);
@@ -1008,6 +1189,7 @@
   }
 
   function sendState() {
+    if (isHost()) sendBots();
     var p = G.players.local;
     if (!p) return;
     netSend({
@@ -1021,12 +1203,7 @@
     });
   }
 
-  function updateLocal(dt) {
-    var p = G.players.local;
-    if (!p) return;
-    var g = G.world.groundY;
-    var keys = G.keys;
-
+  function tickTimers(p, dt) {
     if (p.invulnTimer > 0) p.invulnTimer = Math.max(0, p.invulnTimer - dt);
     if (p.frozen > 0) p.frozen = Math.max(0, p.frozen - dt);
     if (p.castTimer > 0) p.castTimer = Math.max(0, p.castTimer - dt);
@@ -1035,8 +1212,15 @@
     if (p.slowTimer > 0) p.slowTimer = Math.max(0, p.slowTimer - dt);
     if (p.rootTimer > 0) p.rootTimer = Math.max(0, p.rootTimer - dt);
     if (p.boostTimer > 0) p.boostTimer = Math.max(0, p.boostTimer - dt);
+  }
+
+  function updateLocal(dt) {
+    var p = G.players.local;
+    if (!p) return;
+    var keys = G.keys;
 
     if (!p.alive) {
+      tickTimers(p, dt);
       p.respawnTimer -= dt;
       if (p.respawnTimer <= 0) {
         resetPlayer(p);
@@ -1046,16 +1230,37 @@
       return;
     }
 
+    var dir = 0;
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) dir -= 1;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) dir += 1;
+    var input = {
+      dir: dir,
+      down: keys.has('KeyS') || keys.has('ArrowDown'),
+      jumpHeld: keys.has('KeyW') || keys.has('Space') || keys.has('ArrowUp'),
+      jumpPressed: jumpBufferTimer > 0
+    };
+    jumpBufferTimer = 0;
+    stepPlayer(p, input, dt);
+  }
+
+  // 입력 기반 플레이어 물리 — 로컬 플레이어와 봇이 같은 함수로 움직인다.
+  // input = { dir: -1|0|1, down: bool, jumpHeld: bool, jumpPressed: bool(이번 프레임 새로 누름) }
+  // 타이머 감소 + 에너지 회복 + 이동/점프/발판/지면 + 애니메이션. 리스폰은 호출측 담당.
+  function stepPlayer(p, input, dt) {
+    if (!p) return;
+    input = input || {};
+    var g = G.world.groundY;
+    tickTimers(p, dt);
+    if (!p.alive) return;
+    var isMine = p === players.real();
+
     p.energy = Math.min(p.maxEnergy, p.energy + ENERGY_REGEN * dt);
 
     var controllable = !G.matchOver && !(p.frozen > 0);
     var rooted = p.rootTimer > 0;
     var maxSpeed = MAX_SPEED * (p.slowTimer > 0 ? 0.5 : 1) * (p.boostTimer > 0 ? BOOST_SPEED : 1);
     var dir = 0;
-    if (controllable && !rooted) {
-      if (keys.has('KeyA') || keys.has('ArrowLeft')) dir -= 1;
-      if (keys.has('KeyD') || keys.has('ArrowRight')) dir += 1;
-    }
+    if (controllable && !rooted) dir = input.dir > 0 ? 1 : (input.dir < 0 ? -1 : 0);
 
     if (dir !== 0) {
       p.facing = dir;
@@ -1074,25 +1279,25 @@
     }
 
     // 아래로 통과
-    var downHeld = controllable && (keys.has('KeyS') || keys.has('ArrowDown'));
+    var downHeld = controllable && !!input.down;
     if (downHeld) {
       if (p.onGround && p._plat) { p.onGround = false; p._plat = null; p.y += 2; }
       p._drop = DROP_TIME;
     }
 
-    // 점프 (코요테 + 버퍼)
-    if (p.onGround) coyoteTimer = COYOTE; else coyoteTimer -= dt;
-    if (jumpBufferTimer > 0) jumpBufferTimer -= dt;
-    if (controllable && !rooted && jumpBufferTimer > 0 && coyoteTimer > 0 && !downHeld) {
+    // 점프 (코요테 + 버퍼, 플레이어별)
+    if (input.jumpPressed) p._jbuf = JUMP_BUFFER;
+    if (p.onGround) p._coyote = COYOTE; else p._coyote = (p._coyote || 0) - dt;
+    if (p._jbuf > 0) p._jbuf -= dt;
+    if (controllable && !rooted && p._jbuf > 0 && p._coyote > 0 && !downHeld) {
       p.vy = JUMP_VY * (p.boostTimer > 0 ? BOOST_JUMP : 1);
       p.onGround = false;
       p._plat = null;
-      coyoteTimer = 0; jumpBufferTimer = 0;
+      p._coyote = 0; p._jbuf = 0;
       spawnDust(p.x + p.w / 2, p.y + p.h, 8);
-      emit('jump', {});
+      if (isMine) emit('jump', {});
     }
-    var holdingJump = keys.has('KeyW') || keys.has('Space') || keys.has('ArrowUp');
-    if (!holdingJump && p.vy < -320) p.vy += 4000 * dt;
+    if (!input.jumpHeld && p.vy < -320) p.vy += 4000 * dt;
 
     p.vy += G.gravity * dt;
     if (p.vy > 1800) p.vy = 1800;
@@ -1141,7 +1346,7 @@
     if (p.onGround && !wasGround && landedVy > 500) {
       spawnDust(p.x + p.w / 2, p.y + p.h, Math.min(16, Math.floor(landedVy / 90)));
     }
-    if (p.onGround && !wasGround) emit('land', { platform: p._plat ? p._plat.kind : null });
+    if (p.onGround && !wasGround && isMine) emit('land', { platform: p._plat ? p._plat.kind : null });
     p._wasGround = p.onGround;
 
     stepWalk(p, dt);
@@ -1155,7 +1360,7 @@
 
   function updateRemote(dt) {
     var os = players.list();
-    for (var i = 0; i < os.length; i++) updateOne(os[i], dt);
+    for (var i = 0; i < os.length; i++) if (!os[i]._sim) updateOne(os[i], dt);
   }
 
   function updateOne(r, dt) {
@@ -3260,6 +3465,26 @@
     lastTs = 0;
     window.requestAnimationFrame(frame);
   }
+
+  // 봇 모듈(bots.js)용 내부 훅 — 다른 모듈은 쓰지 말 것
+  G._botHooks = {
+    addBotPlayer: addBotPlayer,
+    removePlayer: removeOther,
+    setPlayerSlot: setPlayerSlot,
+    resetPlayer: resetPlayer,
+    koBurst: koBurst,
+    respawnBurst: respawnBurst,
+    creditKill: creditKill,
+    netSend: netSend,
+    isOnline: isOnline,
+    isHost: isHost,
+    myId: myId,
+    slotSpawnX: function (slot) { return SLOT_SPAWN_X[((slot | 0) % 8 + 8) % 8]; },
+    respawnTime: RESPAWN_TIME,
+    koCreditTime: KO_CREDIT_TIME,
+    boostArmor: BOOST_ARMOR,
+    jumpVy: JUMP_VY
+  };
 
   // 초기 화면: 시작 전에도 배경을 그림
   resize();

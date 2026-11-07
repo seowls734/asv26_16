@@ -16,11 +16,14 @@
   var MAX_PLAYERS = 8;
   var HOST_ID = 'h';
   var FULL_TEXT = '방이 가득 찼습니다 (최대 8명).';
+  var PUB_ROOMS = 12;            // 빠른 매칭 공개 방 PUB1..PUB12
+  var QUICK_JOIN_TIMEOUT = 4000;  // 공개 방 하나에 참가 시도하는 시간
 
   var peer = null;
   var handlers = {};
   var pingTimer = null;
   var closedOnPurpose = false;
+  var quickRun = null;   // 진행 중인 빠른 매칭 { cancelled, reject }
 
   // 호스트: 게스트 링크 목록 id → { id, slot, conn, lastSeen }
   var links = {};
@@ -170,7 +173,7 @@
     c.on('open', function () {
       if (closedOnPurpose) { try { c.close(); } catch (e) {} return; }
       var slot = lowestFreeSlot();
-      if (Net.peers.length >= MAX_PLAYERS || slot < 0) {
+      if (Net.peers.length + Net.reserved >= MAX_PLAYERS || slot < 0) {
         rejected = true;
         rawSend(c, { t: '_full', message: FULL_TEXT });
         setTimeout(function () { try { c.close(); } catch (e) {} }, 500);
@@ -250,6 +253,8 @@
     myId: HOST_ID,
     peers: [{ id: HOST_ID, slot: 0 }],
     maxPlayers: MAX_PLAYERS,
+    isPublic: false,   // 빠른 매칭 공개 방이면 true
+    reserved: 0,       // 봇이 차지한 자리 수 (setReserved)
 
     slotOf: function (id) {
       for (var i = 0; i < Net.peers.length; i++) if (Net.peers[i].id === id) return Net.peers[i].slot;
@@ -257,146 +262,93 @@
     },
 
     host: function () {
-      return new Promise(function (resolve, reject) {
-        try { requirePeerJS(); } catch (e) { reject(e); return; }
-        if (peer) Net.close();
-        closedOnPurpose = false;
-        resetState();
-        Net.mode = 'host';
-        Net.isHost = true;
-        var attempts = 0;
-
-        (function tryOpen() {
-          attempts++;
-          var code = makeCode();
-          var p = new window.Peer(ID_PREFIX + code);
-          var opened = false;
-          peer = p;
-          p.on('open', function () {
-            if (peer !== p) return;
-            opened = true;
-            Net.roomCode = code;
-            hostStartPing();
-            resolve(code);
-          });
-          p.on('connection', function (c) {
-            if (peer !== p) return;
-            hostOnConnection(c);
-          });
-          p.on('disconnected', function () {
-            // 중계(시그널링) 서버와 끊겨도 기존 연결은 유지됨 — 새 참가를 위해 재접속 시도
-            if (peer === p && opened && !closedOnPurpose) { try { p.reconnect(); } catch (e) {} }
-          });
-          p.on('error', function (err) {
-            if (peer !== p) return;
-            if (!opened && err && err.type === 'unavailable-id' && attempts < 5) {
-              try { p.destroy(); } catch (e) {}
-              tryOpen();
-              return;
-            }
-            if (opened && err && err.type === 'peer-unavailable') return;
-            var e = fail(errorText(err));
-            if (!opened) reject(e);
-          });
-        })();
-      });
+      return openHost(makeCode, 5, false, false);
     },
 
     join: function (code) {
+      code = String(code || '').trim().toUpperCase();
+      try { requirePeerJS(); } catch (e) { return Promise.reject(e); }
+      if (!/^[A-Z0-9]{5}$/.test(code)) return Promise.reject(fail('방 코드는 5자리 영문/숫자입니다.'));
+      return openJoin(code, 15000, false, false);
+    },
+
+    /* 빠른 매칭: 공개 방 PUB1..PUB12 를 (무작위 시작점부터) 차례로 훑어 들어갈 수 있는 방에 참가.
+     * 방이 없으면(peer-unavailable) 그 아이디로 직접 방을 연다. 그 사이 누가 먼저 열었으면(unavailable-id) 다시 참가 시도.
+     * 꽉 찼거나 응답이 없으면 다음 방. 전부 꽉 찼으면 무작위 접미사의 공개 방을 연다.
+     * → Promise { role: 'host'|'guest', code }. Net.close() 로 취소하면 kind 'cancel' 로 reject. */
+    quickMatch: function () {
+      try { requirePeerJS(); } catch (e) { return Promise.reject(e); }
+      cancelQuick();
+      if (peer) closeInternal();
+      var run = { cancelled: false, reject: null };
+      quickRun = run;
       return new Promise(function (resolve, reject) {
-        try { requirePeerJS(); } catch (e) { reject(e); return; }
-        code = String(code || '').trim().toUpperCase();
-        if (!/^[A-Z0-9]{5}$/.test(code)) { reject(fail('방 코드는 5자리 영문/숫자입니다.')); return; }
-        if (peer) Net.close();
-        closedOnPurpose = false;
-        resetState();
-        Net.mode = 'guest';
-        Net.isHost = false;
-        Net.roomCode = code;
-        Net.myId = null;
-        Net.peers = [];
-        var done = false;
-        var p = new window.Peer();
-        peer = p;
+        run.reject = reject;
+        var order = [];
+        var startAt = Math.floor(Math.random() * PUB_ROOMS);
+        for (var i = 0; i < PUB_ROOMS; i++) order.push(1 + (startAt + i) % PUB_ROOMS);
+        var idx = 0;
 
-        function giveUp(message) {
-          if (done) return;
-          done = true;
-          var e = fail(message);
-          if (peer === p) {
-            stopPing();
-            if (hostConn) { try { hostConn.close(); } catch (x) {} }
-            hostConn = null;
-            try { p.destroy(); } catch (x) {}
-            peer = null;
-          }
-          reject(e);
+        function live() { return !run.cancelled && quickRun === run; }
+        function finish(role, code) {
+          if (!live()) return;
+          quickRun = null;
+          resolve({ role: role, code: code });
         }
-
-        var joinTimer = setTimeout(function () {
-          giveUp('방에 연결하지 못했습니다. 코드를 확인하고 다시 시도해 주세요.');
-        }, 15000);
-
-        p.on('open', function () {
-          if (peer !== p) return;
-          var c = p.connect(ID_PREFIX + code, { reliable: true, serialization: 'json' });
-          hostConn = c;
-          c.on('open', function () {
-            hostLastSeen = Date.now();
-            stopPing();
-            pingTimer = setInterval(function () {
-              if (Date.now() - hostLastSeen > TIMEOUT) {
-                if (!done) giveUp('방에 연결하지 못했습니다. 코드를 확인하고 다시 시도해 주세요.');
-                else guestLostHost();
-                return;
-              }
-              rawSend(c, { t: '_ping' });
-            }, PING_INTERVAL);
+        function bail(e) {
+          if (!live()) return;
+          quickRun = null;
+          var err = fail((e && e.message) || '빠른 매칭에 실패했습니다.');
+          err.kind = e && e.kind;
+          reject(err);
+        }
+        function next() {
+          if (!live()) return;
+          if (idx >= order.length) { fallback(); return; }
+          tryJoin('PUB' + order[idx++], true);
+        }
+        function tryJoin(code, mayHost) {
+          openJoin(code, QUICK_JOIN_TIMEOUT, true, true).then(function () {
+            finish('guest', code);
+          }, function (e) {
+            if (!live()) return;
+            var kind = e && e.kind;
+            if (kind === 'missing' && mayHost) tryHost(code);
+            else if (kind === 'net' || kind === 'nopeer') bail(e);
+            else next(); // full / timeout / closed / 경쟁 뒤에도 없음 → 다음 방
           });
-          c.on('data', function (msg) {
-            if (hostConn !== c || !msg || typeof msg.t !== 'string') return;
-            hostLastSeen = Date.now();
-            switch (msg.t) {
-              case '_ping': rawSend(c, { t: '_pong' }); return;
-              case '_pong': return;
-              case '_full': clearTimeout(joinTimer); giveUp(msg.message || FULL_TEXT); return;
-              case '_bye': guestLostHost(); return;
-              case '_welcome': {
-                if (done) return;
-                done = true;
-                clearTimeout(joinTimer);
-                Net.myId = msg.id;
-                Net.peers = copyPeers(msg.peers || []);
-                Net.connected = true;
-                emit('net:connected', { id: msg.id, slot: msg.slot });
-                for (var i = 0; i < Net.peers.length; i++) {
-                  if (Net.peers[i].id !== Net.myId) emit('net:peerjoin', { id: Net.peers[i].id, slot: Net.peers[i].slot });
-                }
-                emit('net:roster', rosterDetail());
-                resolve();
-                return;
-              }
-              case '_roster': if (Net.connected) guestApplyRoster(msg.peers || []); return;
-            }
-            if (!Net.connected) return;
-            deliver(msg);
+        }
+        function tryHost(code) {
+          openHost(function () { return code; }, 1, true, true).then(function () {
+            finish('host', code);
+          }, function (e) {
+            if (!live()) return;
+            var kind = e && e.kind;
+            if (kind === 'taken') tryJoin(code, false); // 방금 누가 열었다 → 그 방에 참가
+            else if (kind === 'net' || kind === 'nopeer') bail(e);
+            else next();
           });
-          var gone = function () {
-            if (hostConn !== c) return;
-            if (!done) { clearTimeout(joinTimer); giveUp('방에 연결하지 못했습니다. 코드를 확인하고 다시 시도해 주세요.'); return; }
-            guestLostHost();
-          };
-          c.on('close', gone);
-          c.on('error', gone);
-        });
-        p.on('error', function (err) {
-          if (peer !== p) return;
-          if (!done) { clearTimeout(joinTimer); giveUp(errorText(err)); return; }
-          if (err && (err.type === 'network' || err.type === 'server-error' ||
-                      err.type === 'socket-error' || err.type === 'socket-closed')) return; // 시그널링만 끊김: 데이터 연결은 유지
-          fail(errorText(err));
-        });
+        }
+        function fallback() {
+          openHost(function () { return 'PUB' + makeCode(); }, 5, true, true).then(function (code) {
+            finish('host', code);
+          }, bail);
+        }
+        next();
       });
+    },
+
+    // 봇 등 사람 외 참가자가 차지하는 자리 수 (방 정원에 포함). 1 + 게스트 + reserved ≥ 8 이면 새 게스트 거절.
+    setReserved: function (n) {
+      n = Math.floor(Number(n) || 0);
+      if (n < 0) n = 0;
+      if (n > MAX_PLAYERS - 1) n = MAX_PLAYERS - 1;
+      Net.reserved = n;
+    },
+
+    // 남은 사람 자리 수 (호스트 기준)
+    freeSeats: function () {
+      return Math.max(0, MAX_PLAYERS - Net.peers.length - Net.reserved);
     },
 
     // msg.from = 내 아이디. toId 없으면 나를 제외한 모두에게, 있으면 그 사람에게만.
@@ -418,26 +370,226 @@
     },
 
     close: function () {
-      closedOnPurpose = true;
-      stopPing();
-      var k;
-      for (k in links) if (links.hasOwnProperty(k)) rawSend(links[k].conn, { t: '_bye' });
-      if (hostConn) rawSend(hostConn, { t: '_bye' });
-      var conns = [];
-      for (k in links) if (links.hasOwnProperty(k)) conns.push(links[k].conn);
-      if (hostConn) conns.push(hostConn);
-      var p = peer;
-      peer = null;
-      resetState();
-      Net.mode = 'offline';
-      Net.isHost = true;
-      // _bye 가 전송될 시간을 조금 준 뒤 정리
-      setTimeout(function () {
-        for (var i = 0; i < conns.length; i++) { try { conns[i].close(); } catch (e) {} }
-        if (p) { try { p.destroy(); } catch (e) {} }
-      }, 50);
+      cancelQuick();
+      closeInternal();
     },
   };
+
+  /* ───────────── 내부: 방 열기 / 방 참가 ───────────── */
+  // quiet: net:error 를 내보내지 않고 실패 시 조용히 정리 (빠른 매칭 탐색용). 실패 Error 에는 kind:
+  //   'taken'(아이디 사용 중) | 'missing'(방 없음) | 'full' | 'timeout' | 'closed' | 'net'(중계 서버) | 'other'
+  function quietOrFail(message, kind, quiet) {
+    var e = quiet ? new Error(message) : fail(message);
+    e.kind = kind;
+    return e;
+  }
+
+  function kindOf(err) {
+    var t = err && err.type;
+    if (t === 'unavailable-id') return 'taken';
+    if (t === 'peer-unavailable') return 'missing';
+    if (t === 'network' || t === 'server-error' || t === 'socket-error' ||
+        t === 'socket-closed' || t === 'browser-incompatible') return 'net';
+    return 'other';
+  }
+
+  function quietReset() {
+    resetState();
+    Net.mode = 'offline';
+    Net.isHost = true;
+    Net.isPublic = false;
+    Net.roomCode = null;
+  }
+
+  // nextCode(): 시도할 방 코드. unavailable-id 면 maxAttempts 까지 nextCode() 로 다시 시도. → Promise(code)
+  function openHost(nextCode, maxAttempts, isPublic, quiet) {
+    return new Promise(function (resolve, reject) {
+      try { requirePeerJS(); } catch (e) { e.kind = 'nopeer'; reject(e); return; }
+      if (peer) closeInternal();
+      closedOnPurpose = false;
+      resetState();
+      Net.mode = 'host';
+      Net.isHost = true;
+      Net.isPublic = !!isPublic;
+      var attempts = 0;
+
+      (function tryOpen() {
+        attempts++;
+        var code = nextCode();
+        var p = new window.Peer(ID_PREFIX + code);
+        var opened = false;
+        peer = p;
+        p.on('open', function () {
+          if (peer !== p) return;
+          opened = true;
+          Net.roomCode = code;
+          hostStartPing();
+          resolve(code);
+        });
+        p.on('connection', function (c) {
+          if (peer !== p) return;
+          hostOnConnection(c);
+        });
+        p.on('disconnected', function () {
+          // 중계(시그널링) 서버와 끊겨도 기존 연결은 유지됨 — 새 참가를 위해 재접속 시도
+          if (peer === p && opened && !closedOnPurpose) { try { p.reconnect(); } catch (e) {} }
+        });
+        p.on('error', function (err) {
+          if (peer !== p) return;
+          if (!opened && err && err.type === 'unavailable-id' && attempts < maxAttempts) {
+            try { p.destroy(); } catch (e) {}
+            tryOpen();
+            return;
+          }
+          if (opened && err && err.type === 'peer-unavailable') return;
+          var e = quietOrFail(errorText(err), kindOf(err), quiet && !opened);
+          if (!opened) {
+            if (quiet) {
+              try { p.destroy(); } catch (x) {}
+              peer = null;
+              quietReset();
+            }
+            reject(e);
+          }
+        });
+      })();
+    });
+  }
+
+  // code: 방 코드 (PeerJS 아이디 = ID_PREFIX + code). → Promise() (net:connected 이후 resolve)
+  function openJoin(code, timeoutMs, isPublic, quiet) {
+    return new Promise(function (resolve, reject) {
+      try { requirePeerJS(); } catch (e) { e.kind = 'nopeer'; reject(e); return; }
+      if (peer) closeInternal();
+      closedOnPurpose = false;
+      resetState();
+      Net.mode = 'guest';
+      Net.isHost = false;
+      Net.isPublic = !!isPublic;
+      Net.roomCode = code;
+      Net.myId = null;
+      Net.peers = [];
+      var done = false;
+      var p = new window.Peer();
+      peer = p;
+      var NOJOIN = quiet ? '공개 방에 연결하지 못했습니다.' : '방에 연결하지 못했습니다. 코드를 확인하고 다시 시도해 주세요.';
+
+      function giveUp(message, kind) {
+        if (done) return;
+        done = true;
+        var e = quietOrFail(message, kind, quiet);
+        if (peer === p) {
+          stopPing();
+          if (hostConn) { try { hostConn.close(); } catch (x) {} }
+          hostConn = null;
+          try { p.destroy(); } catch (x) {}
+          peer = null;
+          if (quiet) quietReset();
+        }
+        reject(e);
+      }
+
+      var joinTimer = setTimeout(function () {
+        giveUp(NOJOIN, 'timeout');
+      }, timeoutMs);
+
+      p.on('open', function () {
+        if (peer !== p) return;
+        var c = p.connect(ID_PREFIX + code, { reliable: true, serialization: 'json' });
+        hostConn = c;
+        c.on('open', function () {
+          hostLastSeen = Date.now();
+          stopPing();
+          pingTimer = setInterval(function () {
+            if (Date.now() - hostLastSeen > TIMEOUT) {
+              if (!done) giveUp(NOJOIN, 'timeout');
+              else guestLostHost();
+              return;
+            }
+            rawSend(c, { t: '_ping' });
+          }, PING_INTERVAL);
+        });
+        c.on('data', function (msg) {
+          if (hostConn !== c || !msg || typeof msg.t !== 'string') return;
+          hostLastSeen = Date.now();
+          switch (msg.t) {
+            case '_ping': rawSend(c, { t: '_pong' }); return;
+            case '_pong': return;
+            case '_full': clearTimeout(joinTimer); giveUp(msg.message || FULL_TEXT, 'full'); return;
+            case '_bye': guestLostHost(); return;
+            case '_welcome': {
+              if (done) return;
+              done = true;
+              clearTimeout(joinTimer);
+              Net.myId = msg.id;
+              Net.peers = copyPeers(msg.peers || []);
+              Net.connected = true;
+              emit('net:connected', { id: msg.id, slot: msg.slot });
+              for (var i = 0; i < Net.peers.length; i++) {
+                if (Net.peers[i].id !== Net.myId) emit('net:peerjoin', { id: Net.peers[i].id, slot: Net.peers[i].slot });
+              }
+              emit('net:roster', rosterDetail());
+              resolve();
+              return;
+            }
+            case '_roster': if (Net.connected) guestApplyRoster(msg.peers || []); return;
+          }
+          if (!Net.connected) return;
+          deliver(msg);
+        });
+        var gone = function () {
+          if (hostConn !== c) return;
+          if (!done) { clearTimeout(joinTimer); giveUp(NOJOIN, 'closed'); return; }
+          guestLostHost();
+        };
+        c.on('close', gone);
+        c.on('error', gone);
+      });
+      p.on('error', function (err) {
+        if (peer !== p) return;
+        if (!done) { clearTimeout(joinTimer); giveUp(errorText(err), kindOf(err)); return; }
+        if (err && (err.type === 'network' || err.type === 'server-error' ||
+                    err.type === 'socket-error' || err.type === 'socket-closed')) return; // 시그널링만 끊김: 데이터 연결은 유지
+        fail(errorText(err));
+      });
+    });
+  }
+
+  // 진행 중인 빠른 매칭 취소
+  function cancelQuick() {
+    if (!quickRun) return;
+    var q = quickRun;
+    quickRun = null;
+    q.cancelled = true;
+    if (q.reject) {
+      var e = new Error('빠른 매칭을 취소했습니다.');
+      e.kind = 'cancel';
+      q.reject(e);
+    }
+  }
+
+  // 연결 정리 (빠른 매칭 취소는 하지 않음)
+  function closeInternal() {
+    closedOnPurpose = true;
+    stopPing();
+    var k;
+    for (k in links) if (links.hasOwnProperty(k)) rawSend(links[k].conn, { t: '_bye' });
+    if (hostConn) rawSend(hostConn, { t: '_bye' });
+    var conns = [];
+    for (k in links) if (links.hasOwnProperty(k)) conns.push(links[k].conn);
+    if (hostConn) conns.push(hostConn);
+    var p = peer;
+    peer = null;
+    resetState();
+    Net.mode = 'offline';
+    Net.isHost = true;
+    Net.isPublic = false;
+    // _bye 가 전송될 시간을 조금 준 뒤 정리
+    setTimeout(function () {
+      for (var i = 0; i < conns.length; i++) { try { conns[i].close(); } catch (e) {} }
+      if (p) { try { p.destroy(); } catch (e) {} }
+    }, 50);
+  }
 
   function requirePeerJS() {
     if (typeof window.Peer !== 'function') {

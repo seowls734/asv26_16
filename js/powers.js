@@ -10,7 +10,7 @@
   // ======================================================================
   var CAST_TIME = 0.25;
   var MAX_PARTS = 420;           // 불꽃 자체 파티클 상한
-  var MAX_FX = 400;              // 활성 효과 상한 (초과 시 가장 오래된 것부터 제거)
+  var MAX_FX = 1200;             // 활성 효과 상한 (초과 시 가장 오래된 것부터 제거)
   var PULL_MAX = 620;            // 끌어당김으로 올릴 수 있는 최대 속도 (px/s)
   var PULL_DRIFT = 220;          // 끌어당김 보조 위치 이동 상한 (px/s) — AI/입력 감속을 이기기 위한 약한 직접 이동
   var KEYS = ['KeyJ', 'KeyK', 'KeyL', 'KeyI'];
@@ -63,6 +63,8 @@
   }
   // 내 net id (연습 모드 = 로컬 플레이어 id, 기본 'h')
   function myId() {
+    var pv = G.players && G.players.pov;
+    if (pv && pv.id != null) { return pv.id; }   // 봇 시점 시뮬레이션 중
     if (G.Net && G.Net.myId != null && G.Net.mode !== 'offline') { return G.Net.myId; }
     var lp = localP();
     if (lp && lp.id != null) { return lp.id; }
@@ -98,6 +100,21 @@
   function isAuthority() {
     if (G.Mutants && typeof G.Mutants.isAuthority === 'function') { return !!G.Mutants.isAuthority(); }
     return !!((G.Net && G.Net.isHost) || G.mode === 'practice');
+  }
+  // ---- 봇 그림자 시뮬레이션 태그 ----
+  // curTag = 지금 실행 중인 시전/효과의 태그 {pov: 시점 플레이어, cs: 봇 시전자 그림자, bm: 봇 시전 표시용 본체}
+  // addFx 는 새 효과에 이 태그를 물려준다.
+  var curTag = null;
+  function povP() { return (G.players && G.players.pov) || null; }
+  function withPov(p, fn) {
+    if (p && G.players && typeof G.players.withPov === 'function') { return G.players.withPov(p, fn); }
+    return fn();
+  }
+  // 돌연변이 상태이상/끌어당김: 시전 1회당 한 인스턴스만 (피격 그림자, 봇 표시용 본체 제외)
+  function mutAuth() {
+    if (!isAuthority()) { return false; }
+    if (curTag && (curTag.bm || (curTag.pov && !curTag.cs))) { return false; }
+    return true;
   }
   function rectHit(a, b) {
     if (typeof G.rectHit === 'function') { return G.rectHit(a, b); }
@@ -196,12 +213,13 @@
   }
   function doHitMutant(m, dmg, kx, ky, fx) {
     if (G.Mutants && typeof G.Mutants.hit === 'function') {
-      G.Mutants.hit(m, dmg, kx, ky, { skill: fx.skill, castId: fx.castId });
+      G.Mutants.hit(m, dmg, kx, ky, { skill: fx.skill, castId: fx.castId, by: attackerOf(fx) });
     }
   }
   function hitMutantsBy(fx, test, dmg, knock, cx, cy, limit) {
     var out = [];
     if (!fx || fx.owner !== 'local') { return out; }
+    if (fx._pov && !fx._cs) { return out; }          // 피격 시점 그림자는 돌연변이를 치지 않음
     var ms = mutantList().slice();
     for (var i = 0; i < ms.length; i++) {
       var m = ms[i];
@@ -257,7 +275,7 @@
   }
   function statusMutantsBy(test, kind, secs) {
     var out = [];
-    if (!isAuthority()) { return out; }
+    if (!mutAuth()) { return out; }
     var ms = mutantList();
     for (var i = 0; i < ms.length; i++) {
       var m = ms[i];
@@ -371,6 +389,11 @@
     addFx: function (fx) {
       if (!fx || typeof fx !== 'object') { return fx; }
       if (fx.owner !== 'remote') { fx.owner = 'local'; }
+      if (curTag) {
+        if (curTag.pov && !fx._pov) { fx._pov = curTag.pov; }
+        if (curTag.cs) { fx._cs = true; }
+        if (curTag.bm) { fx._bm = true; }
+      }
       if (fx.casterId == null) {
         var cid = attackerOf(fx);
         if (cid != null) { fx.casterId = cid; }
@@ -428,7 +451,7 @@
     // ---- 끌어당김 ----
     pullMutants: function (fx, cx, cy, r, accel, dt) {
       var out = [];
-      if (!isAuthority() || !(dt > 0)) { return out; }
+      if (!mutAuth() || !(dt > 0)) { return out; }
       var ms = mutantList();
       for (var i = 0; i < ms.length; i++) {
         var m = ms[i];
@@ -509,15 +532,32 @@
     handPos: handPos,                    // (p) → {x, y, dir}
     shake: shake,
     now: function () { return clock; },  // 프레임워크 시계 (초)
-    lockCast: function (secs) { castLock = Math.max(castLock, +secs || 0); }, // 로컬 시전 잠금
+    lockCast: function (secs) { setLock(localP(), secs); }, // 시전자 시전 잠금 (봇 시점이면 그 봇)
     statusLocal: function (kind, secs) { return applyPlayerStatus(localP(), kind, secs); }, // 로컬 플레이어 직접
     reset: function () { resetFx(); }
   };
 
+  function tagOf(f) { return (f._pov || f._cs || f._bm) ? { pov: f._pov || null, cs: !!f._cs, bm: !!f._bm } : null; }
+  // 그림자 효과의 시점 봇이 게임에서 빠졌는가
+  function povGone(f) {
+    var v = f._pov;
+    if (!v) { return false; }
+    var o = G.players && G.players.others;
+    return !o || o[v.id] !== v;
+  }
+  function runFx(f, fn) {
+    var prev = curTag;
+    curTag = tagOf(f);
+    try {
+      if (f._pov) { withPov(f._pov, fn); } else { fn(); }
+    } finally { curTag = prev; }
+  }
   function removeFx(i) {
     var f = S.fx[i];
     S.fx.splice(i, 1);
-    if (f && typeof f.end === 'function') { try { f.end(f); } catch (e) { logErr('end', e); } }
+    if (f && typeof f.end === 'function' && !povGone(f)) {
+      try { runFx(f, function () { f.end(f); }); } catch (e) { logErr('end', e); }
+    }
   }
   function resetFx() { S.fx.length = 0; }
 
@@ -527,8 +567,9 @@
       f = list[i];
       if (!f || f.dead) { continue; }
       f.t += dt;
+      if (f._pov && povGone(f)) { f.dead = true; f.end = null; continue; }
       if (typeof f.update === 'function') {
-        try { f.update(f, dt); } catch (e) { logErr('update ' + f.skill, e); f.dead = true; }
+        try { runFx(f, function () { f.update(f, dt); }); } catch (e) { logErr('update ' + f.skill, e); f.dead = true; }
       }
       if (f.t >= f.life) { f.dead = true; }
     }
@@ -540,7 +581,7 @@
     var list = S.fx;
     for (var i = 0; i < list.length; i++) {
       var f = list[i];
-      if (!f || f.dead || typeof f.render !== 'function') { continue; }
+      if (!f || f.dead || f._pov || f._cs || typeof f.render !== 'function') { continue; }   // 그림자는 그리지 않음
       ctx.save();
       try { f.render(f, ctx); } catch (e) { logErr('render ' + f.skill, e); f.render = null; }
       ctx.restore();
@@ -584,7 +625,7 @@
       ctx.beginPath(); ctx.arc(x, y, r * 0.6, 0, Math.PI * 2); ctx.fill();
     }
   }
-  function addPart(o) { if (parts.length < MAX_PARTS) { parts.push(o); } }
+  function addPart(o) { if (parts.length < MAX_PARTS && !povP()) { parts.push(o); } }
   function ember(x, y, vx, vy, life, size) {
     addPart({ k: 'f', x: x, y: y, vx: vx, vy: vy, life: life, max: life, size: size, grav: -120, drag: 2.2 });
   }
@@ -605,6 +646,7 @@
     }
   }
   function ring(x, y, r0, r1, life, width, tier) {
+    if (povP()) { return; }
     rings.push({ x: x, y: y, r0: r0, r1: r1, life: life, max: life, width: width, tier: tier || 1 });
   }
   function sparkOn(e) { fireBurst(e.x + e.w / 2, e.y + e.h / 2, 8, 200); }
@@ -617,7 +659,7 @@
     }
     return who === 'remote' ? 'id:?' : 'local';
   }
-  function setHand(who, t) { hand[handKey(who)] = t; }
+  function setHand(who, t) { if (!povP()) { hand[handKey(who)] = t; } }
   // 다른 플레이어(시전자 제외) 중 test 에 걸리는 첫 번째
   function otherTouched(fx, test) {
     var list = othersP(), me = fx && fx.owner === 'remote' ? casterOf(fx) : null;
@@ -748,25 +790,44 @@
       glow(ctx, x, y - hgt * 0.25, hgt * 0.45, 0, 0.8 * fade);
     }
   }
+  // 화염 질주 진행: 플레이어별 p._dash (로컬 플레이어 + 권한측 봇)
   function updateDash(dt) {
-    if (!dash) { return; }
-    var p = dash.p;
-    if (!p || p !== localP() || !alive(p)) { dash = null; return; }
-    var step = Math.min(dash.left, dt);
-    p.x = clamp(p.x + dash.dir * dash.speed * step, 0, worldW() - p.w);
-    dash.left -= step;
+    var P = G.players;
+    if (!P) { return; }
+    var list = typeof P.all === 'function' ? P.all() : [];
+    for (var di = 0; di < list.length; di++) {
+      if (list[di] && list[di]._dash) { stepDash(list[di], dt); }
+    }
+    dash = localP() ? (localP()._dash || null) : null;
+  }
+  function stepDash(p, dt) {
+    var d = p._dash;
+    if (!alive(p) || !(p === localP() || p._sim)) { p._dash = null; return; }
+    var step = Math.min(d.left, dt);
+    p.x = clamp(p.x + d.dir * d.speed * step, 0, worldW() - p.w);
+    d.left -= step;
     p.vx = 0;
     if (!p.onGround) { p.vy = 0; }
-    if (dash.left > 0) { p.frozen = Math.max(p.frozen || 0, dash.left); }
+    if (d.left > 0) { p.frozen = Math.max(p.frozen || 0, d.left); }
     var cx = p.x + p.w / 2, cy = p.y + p.h * 0.55;
     for (var i = 0; i < 3; i++) {
-      ember(cx - dash.dir * rnd(0, 20), cy + rnd(-22, 22), -dash.dir * rnd(60, 200), rnd(-60, 20), rnd(0.2, 0.4), rnd(10, 20));
+      ember(cx - d.dir * rnd(0, 20), cy + rnd(-22, 22), -d.dir * rnd(60, 200), rnd(-60, 20), rnd(0.2, 0.4), rnd(10, 20));
     }
-    if (dash.left <= 0) {
-      p.x = dash.ex;
-      p.vx = dash.dir * 300;
-      dash = null;
+    if (d.left <= 0) {
+      p.x = d.ex;
+      p.vx = d.dir * 300;
+      p._dash = null;
     }
+  }
+  // 시전 잠금: 로컬 플레이어는 castLock, 봇은 p._castLock
+  function lockOf(p) {
+    if (p && p.isBot) { return +p._castLock || 0; }
+    return castLock;
+  }
+  function setLock(p, secs) {
+    secs = +secs || 0;
+    if (p && p.isBot) { p._castLock = Math.max(+p._castLock || 0, secs); }
+    else { castLock = Math.max(castLock, secs); }
   }
 
   // ---------- 불기둥 ----------
@@ -954,11 +1015,12 @@
       var p = c.p, dir = c.facing;
       var ex = clamp(p.x + dir * DASH_DIST, 0, worldW() - p.w);
       var surf = surfaceBelow(p.x + p.w / 2, p.y + p.h);
-      dash = { p: p, dir: dir, left: DASH_TIME, speed: Math.abs(ex - p.x) / DASH_TIME, ex: ex };
+      p._dash = { dir: dir, left: DASH_TIME, speed: Math.abs(ex - p.x) / DASH_TIME, ex: ex };
+      if (p === localP() && !p.isBot) { dash = p._dash; }
       p.frozen = Math.max(p.frozen || 0, DASH_TIME);
       p.invulnTimer = Math.max(p.invulnTimer || 0, DASH_INVULN);
       p.vx = 0;
-      castLock = Math.max(castLock, DASH_TIME);
+      setLock(p, DASH_TIME);
       return { x0: p.x + p.w / 2, x1: ex + p.w / 2, sy: rel(surf) };
     },
     cast: function (c) {
@@ -1192,26 +1254,135 @@
     var def = getDef(msg.skill);
     if (!def || typeof def.cast !== 'function') { return; }
     var from = msg.from != null ? String(msg.from) : null;
-    if (from !== null && isMe(from)) { return; } // 내 시전의 메아리 무시
-    var rp = from !== null ? playerById(from) : null;
+    // 호스트가 보낸 봇 시전: 시전자 = msg.bot
+    var botId = (msg.bot != null && msg.bot !== '' && (from === 'h' || from === null)) ? String(msg.bot) : null;
+    if (!botId && from !== null && isMe(from)) { return; } // 내 시전의 메아리 무시
+    var cid = botId || from;
+    var rp = cid !== null ? playerById(cid) : null;
     if (rp && rp === localP()) { return; }
-    if (from === null && !rp) { rp = remoteP(); } // 구버전 호환 (from 없음)
+    if (rp && rp._sim) { return; }                 // 내가 시뮬레이션하는 봇 (메아리)
+    if (cid === null && !rp) { rp = remoteP(); } // 구버전 호환 (from 없음)
     var facing = msg.facing >= 0 ? 1 : -1;
     var x = num(msg.x, rp ? rp.x : 0);
     var y = typeof msg.gy === 'number' && isFinite(msg.gy) ? abs(msg.gy) : (rp ? rp.y : groundY() - 62);
-    var p = rp || { id: from, x: x, y: y, w: 34, h: 62, vx: 0, vy: 0, facing: facing, alive: true, isLocal: false };
-    var casterId = from !== null ? from : (rp && rp.id != null ? rp.id : null);
+    var p = rp || { id: cid, x: x, y: y, w: 34, h: 62, vx: 0, vy: 0, facing: facing, alive: true, isLocal: false, isBot: !!botId };
+    var casterId = cid !== null ? cid : (rp && rp.id != null ? rp.id : null);
     var castId = 'r' + (casterId != null ? casterId : '?') + ':' +
       (msg.castId != null ? msg.castId : ('?' + (++castCounter)));
     noteCaster(castId, casterId);
+    var data = (msg.data && typeof msg.data === 'object') ? msg.data : {};
     var ctx = {
       owner: 'remote', skill: def.id, def: def, p: p, x: x, y: y, facing: facing,
-      castId: castId, casterId: casterId,
-      data: (msg.data && typeof msg.data === 'object') ? msg.data : {}
+      castId: castId, casterId: casterId, data: data
     };
     try { def.cast(ctx); } catch (e) { logErr('remote cast ' + def.id, e); }
     if (rp) { rp.castTimer = CAST_TIME; }
+    // 권한측(호스트): 다른 사람의 시전이 내 봇들을 맞히는지 각 봇 시점에서 재생
+    castShadows(def, ctx, casterId);
   }
+
+  // ---- 봇 그림자 시뮬레이션 ----
+  function cloneData(o) {
+    if (!o || typeof o !== 'object') { return {}; }
+    try { return JSON.parse(JSON.stringify(o)); } catch (e) { return {}; }
+  }
+  // 권한측이 시뮬레이션하는 봇 목록
+  function simBots() {
+    var out = [], o = G.players && G.players.others;
+    if (!o) { return out; }
+    for (var k in o) { if (hasOwn.call(o, k) && o[k] && o[k].isBot && o[k]._sim) { out.push(o[k]); } }
+    return out;
+  }
+  // 권한측: 시전 base 를 각 봇 V 의 시점(local = V)에서 '원격 시전'으로 한 번 더 재생한다.
+  // 그 그림자 효과는 그려지지 않고 시각/이벤트가 무음이며, 기술 코드가 '나(local)'에게 하는 모든 일
+  // (피해·상태이상·끌어당김·직접 조작)이 V 에게 적용된다 → 모든 기술이 봇에게도 그대로 통한다.
+  function castShadows(def, base, excludeId) {
+    if (!isAuthority() || !def || typeof def.cast !== 'function') { return; }
+    var bots = simBots();
+    for (var i = 0; i < bots.length; i++) {
+      var v = bots[i];
+      if (v.id === excludeId || !alive(v)) { continue; }
+      shadowCast(def, base, v);
+    }
+  }
+  function shadowCast(def, base, v) {
+    noteCaster(base.castId, base.casterId);
+    var c = {
+      owner: 'remote', skill: def.id, def: def, p: base.p, x: base.x, y: base.y, facing: base.facing,
+      castId: base.castId, casterId: base.casterId, data: cloneData(base.data)
+    };
+    var prev = curTag;
+    curTag = { pov: v, cs: false, bm: false };
+    try { withPov(v, function () { def.cast(c); }); } catch (e) { logErr('shadow cast ' + def.id, e); }
+    finally { curTag = prev; }
+  }
+
+  // 봇이 지금 이 기술을 쓸 수 있는가
+  function botCanCast(bot, id) {
+    var def = getDef(id);
+    if (!def || typeof def.cast !== 'function' || !bot || !alive(bot)) { return false; }
+    var bcd = bot._cd || {};
+    if ((bcd[id] || 0) > 0 || (bot.energy || 0) < def.cost) { return false; }
+    if (bot._dash || (bot._castLock || 0) > 0 || (bot.frozen || 0) > 0) { return false; }
+    return true;
+  }
+  // 권한측 봇 시전. 같은 시전이 세 갈래로 재생된다:
+  //  1) 시전자 그림자 (owner 'local', 시점 = 봇): prepare + 자기 이동/버프 + 돌연변이 피해. 그리지 않음
+  //  2) 표시용 본체 (owner 'remote', 시전자 = 봇): 게스트가 보는 것과 같음 → 진짜 로컬 플레이어(호스트) 피격 + 렌더
+  //  3) 다른 봇들의 피격 그림자 (castShadows)
+  // 게스트에게는 {t:'cast', bot, ...} 로 방송 → 게스트는 2) 처럼 원격 시전으로 처리
+  function botCast(bot, id) {
+    if (!isAuthority() || !botCanCast(bot, id)) { return false; }
+    var def = getDef(id);
+    var facing = bot.facing >= 0 ? 1 : -1;
+    var raw = 'k' + (++castCounter);
+    var castId = 'r' + bot.id + ':' + raw;
+    noteCaster(castId, bot.id);
+    var lctx = { owner: 'local', skill: id, def: def, p: bot, x: bot.x, y: bot.y, facing: facing,
+      castId: castId, casterId: bot.id, data: {} };
+    var csTag = { pov: bot, cs: true, bm: false };
+    var data = {}, ok = true, prev = curTag;
+    if (typeof def.prepare === 'function') {
+      curTag = csTag;
+      try {
+        withPov(bot, function () {
+          var r = def.prepare(lctx);
+          if (r === false) { ok = false; } else if (r && typeof r === 'object') { data = r; }
+        });
+      } catch (e) { logErr('bot prepare ' + id, e); ok = false; }
+      finally { curTag = prev; }
+    }
+    if (!ok) { return false; }
+    if (!bot._cd) { bot._cd = {}; }
+    bot.energy -= def.cost;
+    bot._cd[id] = def.cooldown;
+    bot.castTimer = CAST_TIME;
+    bot.facing = lctx.facing = facing;
+    var bx = bot.x, by = bot.y;
+    if (G.Net && G.Net.isHost && G.Net.connected) {
+      send({ t: 'cast', bot: bot.id, skill: id, castId: raw, x: bx, gy: rel(by), facing: facing, data: data });
+    }
+    // 1) 시전자 그림자
+    lctx.data = cloneData(data);
+    curTag = csTag;
+    try { withPov(bot, function () { def.cast(lctx); }); } catch (e1) { logErr('bot cast(self) ' + id, e1); }
+    finally { curTag = prev; }
+    // 2) 표시용 본체
+    var rctx = { owner: 'remote', skill: id, def: def, p: bot, x: bx, y: by, facing: facing,
+      castId: castId, casterId: bot.id, data: data };
+    curTag = { pov: null, cs: false, bm: true };
+    try { def.cast(rctx); } catch (e2) { logErr('bot cast ' + id, e2); }
+    finally { curTag = prev; }
+    // 3) 다른 봇들
+    castShadows(def, rctx, bot.id);
+    return true;
+  }
+  function botTick(bot, dt) {
+    if (bot._castLock > 0) { bot._castLock = Math.max(0, bot._castLock - dt); }
+    var bcd = bot._cd;
+    if (bcd) { for (var k in bcd) { if (hasOwn.call(bcd, k) && bcd[k] > 0) { bcd[k] = Math.max(0, bcd[k] - dt); } } }
+  }
+
   function bindNet() {
     if (netBound) { return; }
     if (G.Net && typeof G.Net.on === 'function') {
@@ -1252,7 +1423,7 @@
   }
   function localBusy() {
     var p = localP();
-    if (dash || castLock > 0) { return true; }
+    if ((p && p._dash) || castLock > 0) { return true; }
     if (p && G.running && !G.matchOver && p.alive !== false && ((p.castTimer || 0) > 0 || (p.frozen || 0) > 0)) { return true; }
     return false;
   }
@@ -1447,6 +1618,8 @@
       resetFx();
       rings = []; parts = [];
       dash = null; castLock = 0;
+      var ap = G.players && typeof G.players.all === 'function' ? G.players.all() : [];
+      for (var ai = 0; ai < ap.length; ai++) { if (ap[ai]) { ap[ai]._dash = null; ap[ai]._castLock = 0; } }
       for (var hk in hand) { if (hasOwn.call(hand, hk)) { delete hand[hk]; } }
       casterIds = {}; casterKeys = [];
       for (var k in cd) { if (hasOwn.call(cd, k)) { delete cd[k]; } }
@@ -1493,6 +1666,11 @@
 
     cdLeft: function (id) { return cd[id] || 0; },
 
+    // ---- 봇 (bots.js 가 사용, 권한측 전용) ----
+    botCast: botCast,          // (bot, skillId) → 시전 성공 여부
+    botCanCast: botCanCast,    // (bot, skillId) → 쿨다운/에너지/잠금 확인
+    botTick: botTick,          // (bot, dt) → 봇 쿨다운/시전 잠금 감소
+
     onKeyDown: function (code) {
       var idx = KEYS.indexOf(code);
       if (idx < 0) { return; }
@@ -1502,7 +1680,7 @@
       var id = P.slots[idx];
       var def = getDef(id);
       if (!def || typeof def.cast !== 'function') { return; }
-      if ((cd[id] || 0) > 0 || (p.energy || 0) < def.cost || dash || castLock > 0 || (p.frozen || 0) > 0) {
+      if ((cd[id] || 0) > 0 || (p.energy || 0) < def.cost || p._dash || castLock > 0 || (p.frozen || 0) > 0) {
         flashSlot(idx, 'pw-deny'); return;
       }
       var castId = 'c' + (++castCounter);
@@ -1522,6 +1700,9 @@
       p.castTimer = CAST_TIME;
       send({ t: 'cast', skill: id, castId: castId, x: p.x, gy: rel(p.y), facing: ctx.facing, data: data });
       try { def.cast(ctx); } catch (e2) { logErr('cast ' + id, e2); }
+      // 권한측: 내 시전이 봇들을 맞히는지 각 봇 시점에서 재생
+      castShadows(def, { p: p, x: p.x, y: p.y, facing: ctx.facing, castId: 'r' + ctx.casterId + ':' + castId,
+        casterId: ctx.casterId, data: data }, ctx.casterId);
       flashSlot(idx, 'pw-fire');
       emit('skillCast', { skill: id, castId: castId });
     },

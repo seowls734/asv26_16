@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>초능력자: 각성</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -771,6 +771,150 @@
     color: var(--text-dim);
   }
 
+  /* ---------- 빠른 매칭 탐색 / AI 대전 설정 모달 ---------- */
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(8, 12, 11, 0.72);
+  }
+  .modal .panel {
+    width: 100%;
+    max-width: 360px;
+    margin: 0;
+    text-align: center;
+    padding: 1.3rem 1.2rem 1.2rem;
+  }
+  .modal h3 {
+    margin: 0.2rem 0 0.6rem;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 1.6rem;
+    color: #ffcf96;
+    text-shadow: 0 0 12px rgba(255, 120, 30, 0.5);
+  }
+  .modal p { margin: 0 0 1rem; font-size: 0.88rem; color: var(--text-dim); word-break: keep-all; }
+  #quick-status.error { color: #ff8a7a; }
+  #quick-status.waiting { color: var(--text); font-size: 1rem; }
+  /* 탐색 중 회전 톱니 */
+  .gear {
+    width: 46px;
+    height: 46px;
+    margin: 0.2rem auto 0.8rem;
+    border-radius: 50%;
+    border: 5px dashed var(--rust-light);
+    box-shadow: 0 0 14px rgba(255, 120, 30, 0.45), inset 0 0 10px rgba(79, 174, 140, 0.5);
+    animation: gear-spin 2.4s linear infinite;
+  }
+  .gear.stop { animation: none; border-color: #6b5a4a; box-shadow: none; }
+  @keyframes gear-spin { to { transform: rotate(360deg); } }
+
+  .opt-label {
+    display: block;
+    margin: 0.3rem 0 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--rust-light);
+  }
+  /* −  n  + 스테퍼 */
+  .stepper {
+    display: inline-flex;
+    align-items: stretch;
+    margin: 0 0 0.9rem;
+    border: 2px solid #4a3a2c;
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(10, 16, 15, 0.7);
+  }
+  .stepper button {
+    width: 44px;
+    font-family: var(--font-body);
+    font-size: 1.4rem;
+    font-weight: 900;
+    color: #ffd2a8;
+    cursor: pointer;
+    border: 0;
+    background: linear-gradient(180deg, #4a514f 0%, #2a302e 100%);
+  }
+  .stepper button:hover:not(:disabled), .stepper button:focus-visible { filter: brightness(1.25); outline: none; }
+  .stepper button:disabled { opacity: 0.35; cursor: default; }
+  .stepper output {
+    min-width: 3.2em;
+    padding: 0.35rem 0.4rem;
+    font-family: var(--font-title);
+    font-size: 1.5rem;
+    line-height: 1.2;
+    color: var(--moss-bright);
+    text-shadow: 0 0 10px rgba(127, 224, 184, 0.55);
+  }
+  /* 난이도 선택 */
+  .seg {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin: 0 0 1.1rem;
+  }
+  .seg button {
+    flex: 1 1 0;
+    max-width: 96px;
+    padding: 0.5rem 0.3rem;
+    font-family: var(--font-title);
+    font-size: 1.05rem;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-radius: 5px;
+    border: 2px solid #4a3a2c;
+    background: rgba(10, 16, 15, 0.6);
+  }
+  .seg button:hover, .seg button:focus-visible { color: var(--text); outline: none; border-color: #7a5a44; }
+  .seg button[aria-pressed="true"] {
+    color: #fff4e6;
+    border-color: #ffab66;
+    background: linear-gradient(180deg, #c8601f 0%, #8a3511 100%);
+    box-shadow: 0 0 12px rgba(255, 120, 30, 0.45);
+  }
+  .seg button[data-diff="easy"][aria-pressed="true"] {
+    border-color: var(--moss-bright);
+    background: linear-gradient(180deg, #3f9a7b 0%, #1f5546 100%);
+    box-shadow: 0 0 12px rgba(79, 174, 140, 0.45);
+  }
+  .seg button[data-diff="hard"][aria-pressed="true"] {
+    border-color: #ff7b4f;
+    background: linear-gradient(180deg, #a8201a 0%, #5a1208 100%);
+    box-shadow: 0 0 12px rgba(255, 70, 40, 0.5);
+  }
+  /* 로비: AI 추가 */
+  #lobby-ai {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: -0.3rem 0 0.8rem;
+  }
+  #lobby-ai .opt-label { margin: 0; }
+  #lobby-ai .stepper { margin: 0; }
+  #lobby-ai .stepper button { width: 36px; font-size: 1.15rem; }
+  #lobby-ai .stepper output { font-size: 1.15rem; min-width: 2.4em; }
+  .roster li.bot { color: #ffd2a8; border-style: dotted; }
+  .roster .tag.ai-tag { background: #8a9592; }
+  .btn.quick {
+    background:
+      radial-gradient(ellipse at 80% 20%, rgba(255, 240, 180, 0.3), transparent 50%),
+      linear-gradient(180deg, #e07a35 0%, #a8401a 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 230, 190, 0.45),
+      inset 0 -3px 0 rgba(0, 0, 0, 0.3),
+      0 6px 18px rgba(0, 0, 0, 0.45),
+      0 0 26px rgba(255, 130, 40, 0.45);
+  }
+  .btn-row + .btn-row { margin-top: 12px; }
+
   #power-list {
     position: absolute;
     left: 50%;
@@ -900,6 +1044,46 @@
     .roster { grid-template-columns: 1fr; }
   }
 
+  /* ---------- 휴대폰: 스크롤 가능한 패널 · 노치(safe area) ---------- */
+  /* 가운데 정렬 + 넘치면 위가 잘리지 않고 스크롤되도록 (margin:auto 방식) */
+  .modal, #exit-modal, #result {
+    align-items: flex-start;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+  .modal .panel, #exit-modal .panel, #result .panel { margin: auto; }
+  .screen {
+    align-items: flex-start;
+    -webkit-overflow-scrolling: touch;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+  .start-panel { max-width: min(580px, 100%); }
+  .controls td.keys { white-space: normal; }
+
+  /* 가로로 눕힌 휴대폰 (높이가 낮음) */
+  @media (max-height: 500px) {
+    .screen { padding-top: 12px; padding-bottom: 12px; }
+    .game-title { font-size: clamp(2rem, 8vh + 1rem, 3.2rem); }
+    .tagline { margin: 0.35rem auto 0.7rem; }
+    .panel { margin-bottom: 0.9rem; padding: 0.8rem 1rem 0.7rem; }
+    .controls td { padding: 0.25rem 0.25rem; }
+    .btn { padding: 0.55rem 1.1rem; font-size: 1.05rem; }
+    .btn-row + .btn-row { margin-top: 8px; }
+    .modal .panel { padding: 0.9rem 1rem 0.9rem; }
+    .modal h3 { font-size: 1.3rem; margin-bottom: 0.3rem; }
+    .modal p { margin-bottom: 0.6rem; }
+    .gear { width: 34px; height: 34px; margin-bottom: 0.5rem; }
+    .stepper, .seg { margin-bottom: 0.6rem; }
+    #room-code { font-size: 2.2rem; margin-bottom: 0.4rem; }
+    .roster li { min-height: 28px; padding: 3px 6px; font-size: 0.8rem; }
+    #result .panel { padding: 1rem 1rem 0.9rem; }
+    #result-title { font-size: 2.2rem; margin-bottom: 0.7rem; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
     .spore { display: none; }
@@ -956,10 +1140,17 @@
         <ul class="notes">
           <li class="goal">최대 8명 개인전 — 먼저 5 KO 를 따내면 승리</li>
           <li>마지막으로 때린 사람이 KO 를 가져갑니다 (6초 이내)</li>
+          <li><b>빠른 매칭</b> — 공개 방에 바로 입장 · 사람이 적으면 AI 가 4명까지 채웁니다</li>
+          <li><b>AI 대전</b> — AI 1~7명과 실전 연습 (쉬움 · 보통 · 어려움)</li>
           <li class="warn">⚠ 돌연변이 동물이 모두를 공격합니다!</li>
+          <li class="warn">⚠ 판 도중 거대한 보스가 출현 — 처치하면 1점 + 아이템!</li>
         </ul>
       </div>
 
+      <div class="btn-row">
+        <button id="btn-quick" class="btn quick" type="button">빠른 매칭</button>
+        <button id="btn-ai" class="btn steel" type="button">AI 대전</button>
+      </div>
       <div class="btn-row">
         <button id="btn-host" class="btn" type="button">방 만들기</button>
         <button id="btn-join" class="btn moss" type="button">참가하기</button>
@@ -990,6 +1181,14 @@
           <div id="room-code">·····</div>
           <div class="roster-head"><span>참가자</span><b id="host-count">1/8</b></div>
           <ul id="host-roster" class="roster"></ul>
+          <div id="lobby-ai" hidden>
+            <span class="opt-label">AI 추가</span>
+            <div class="stepper">
+              <button id="lobby-ai-minus" type="button" aria-label="AI 한 명 빼기">−</button>
+              <output id="lobby-ai-n" aria-live="polite">0</output>
+              <button id="lobby-ai-plus" type="button" aria-label="AI 한 명 추가">+</button>
+            </div>
+          </div>
           <p id="host-waiting" class="waiting">참가자를 기다리는 중…</p>
           <div class="btn-row">
             <button id="btn-start" class="btn" type="button" disabled>게임 시작</button>
@@ -1055,6 +1254,43 @@
     </div>
   </div>
 
+  <!-- ===== 빠른 매칭 탐색 ===== -->
+  <div id="quick-overlay" class="modal" role="dialog" aria-modal="true" aria-labelledby="quick-title" hidden>
+    <div class="panel">
+      <h3 id="quick-title">빠른 매칭</h3>
+      <div id="quick-gear" class="gear" aria-hidden="true"></div>
+      <p id="quick-status" class="waiting" role="status" aria-live="polite">공개 방을 찾는 중…</p>
+      <div class="btn-row">
+        <button id="btn-quick-retry" class="btn small" type="button" hidden>다시 찾기</button>
+        <button id="btn-quick-cancel" class="btn steel small" type="button">취소</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== AI 대전 설정 ===== -->
+  <div id="ai-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="ai-title" hidden>
+    <div class="panel">
+      <h3 id="ai-title">AI 대전</h3>
+      <p>AI 초능력자들과 개인전 — 먼저 5 KO 를 따내면 승리</p>
+      <span class="opt-label">AI 인원</span>
+      <div class="stepper">
+        <button id="ai-minus" type="button" aria-label="AI 한 명 빼기">−</button>
+        <output id="ai-n" aria-live="polite">3</output>
+        <button id="ai-plus" type="button" aria-label="AI 한 명 추가">+</button>
+      </div>
+      <span class="opt-label">난이도</span>
+      <div class="seg" role="group" aria-label="난이도">
+        <button type="button" data-diff="easy" aria-pressed="false">쉬움</button>
+        <button type="button" data-diff="normal" aria-pressed="true">보통</button>
+        <button type="button" data-diff="hard" aria-pressed="false">어려움</button>
+      </div>
+      <div class="btn-row">
+        <button id="btn-ai-go" class="btn small" type="button">시작</button>
+        <button id="btn-ai-cancel" class="btn steel small" type="button">취소</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== 결과 ===== -->
   <div id="result" hidden>
     <div class="panel">
@@ -1084,6 +1320,8 @@
   <script src="js/skills_kit2.js"></script>
   <script src="js/skills_kit3.js"></script>
   <script src="js/missions.js"></script>
+  <script src="js/bots.js"></script>
+  <script src="js/touch.js"></script>
   <script>
   (function () {
     'use strict';
@@ -1116,6 +1354,50 @@
     var hosting = false;
     var nameCache = {};        // id → 슬롯 이름 (나간 뒤에도 이름 표시용)
 
+    // ---- AI 봇 (Game.Bots 는 bots.js — 없으면 모든 호출을 건너뜀) ----
+    var PUBLIC_MIN = 4;        // 공개 방: 사람 + AI 가 최소 4명이 되도록 채움
+    var wantedBots = 0;        // 이번 판에 쓰는 AI 수 (다시 하기 때 유지)
+    var botDiff = 'normal';
+    var lobbyBots = 0;         // 비공개 방 로비에서 고른 AI 수
+    var quickActive = false;   // 빠른 매칭 탐색 / 입장 대기 중
+    var quickStartTimer = null;
+    var autoRematchTimer = null;
+
+    function botCount() {
+      var B = Game.Bots;
+      try { return B && typeof B.count === 'function' ? (B.count() | 0) : 0; } catch (e) { return 0; }
+    }
+    function botsConfigure(n, diff) {
+      var B = Game.Bots;
+      if (B && typeof B.configure === 'function') {
+        try { B.configure({ count: n, difficulty: diff || 'normal' }); } catch (e) { console.error('[ui] Bots.configure', e); }
+      }
+    }
+    function botsSetCount(n) {
+      var B = Game.Bots;
+      if (B && typeof B.setCount === 'function') {
+        try { B.setCount(n); } catch (e) { console.error('[ui] Bots.setCount', e); }
+      }
+    }
+    function hasBots() { return !!Game.Bots && (wantedBots > 0 || botCount() > 0); }
+    function isBotId(id) {
+      var p = (Game.players && Game.players.byId) ? Game.players.byId(id) : null;
+      return !!(p && p.isBot) || /^b\d+$/.test(String(id));
+    }
+    function humanCount() { return (Net && Net.peers) ? Net.peers.length : 1; }
+    function publicTarget() { return Math.max(0, Math.min(PUBLIC_MIN - humanCount(), MAX_PLAYERS - humanCount())); }
+    function publicLabel(code) {
+      var m = /^PUB(\d+)$/.exec(String(code || ''));
+      return m ? '공개 ' + m[1] + '번 방' : '공개 방';
+    }
+    // 공개 방 호스트: 사람이 줄거나 늘 때마다 AI 수를 다시 맞춤
+    function publicFill() {
+      if (!Game.Bots || !gameStarted || currentMode !== 'host' || !Net || !Net.isPublic) return;
+      var n = publicTarget();
+      wantedBots = n;
+      if (botCount() !== n) botsSetCount(n);
+    }
+
     function setMsg(text, isError) {
       lobbyMsg.textContent = text || '';
       lobbyMsg.classList.toggle('error', !!isError);
@@ -1146,15 +1428,33 @@
     }
 
     // ---- 참가자 목록 ----
-    function renderRoster(listEl, countEl) {
+    // bots: 로비에서 고른 AI 수 — 높은 슬롯부터 차지하는 것으로 표시
+    function renderRoster(listEl, countEl, bots) {
       var ps = peerList();
       cacheNames(ps);
       var me = myId();
+      bots = Math.max(0, Math.min(bots | 0, MAX_PLAYERS - ps.length));
+      var used = {};
+      for (var u = 0; u < ps.length; u++) used[ps[u].slot] = true;
+      var botSlots = [];
+      for (var s = MAX_PLAYERS - 1; s >= 0 && botSlots.length < bots; s--) if (!used[s]) botSlots.unshift(s);
       listEl.textContent = '';
       for (var i = 0; i < MAX_PLAYERS; i++) {
         var li = document.createElement('li');
         var p = ps[i];
-        if (p) {
+        var bi = i - (MAX_PLAYERS - botSlots.length);
+        if (!p && bi >= 0) {
+          var binfo = slotInfo(botSlots[bi]);
+          var bsw = document.createElement('i');
+          bsw.className = 'sw';
+          bsw.style.background = binfo.pal.cloak;
+          li.className = 'bot';
+          li.appendChild(bsw);
+          li.appendChild(document.createTextNode('AI ' + binfo.name));
+          var ta = document.createElement('span');
+          ta.className = 'tag ai-tag'; ta.textContent = 'AI';
+          li.appendChild(ta);
+        } else if (p) {
           var info = slotInfo(p.slot);
           var sw = document.createElement('i');
           sw.className = 'sw';
@@ -1179,16 +1479,33 @@
         }
         listEl.appendChild(li);
       }
-      if (countEl) countEl.textContent = ps.length + '/' + MAX_PLAYERS;
+      if (countEl) countEl.textContent = (ps.length + botSlots.length) + '/' + MAX_PLAYERS;
       return ps.length;
+    }
+
+    // 로비 AI 추가 −/+ (0 .. 7 − 게스트 수)
+    function setLobbyBots(n) {
+      var max = Math.max(0, MAX_PLAYERS - humanCount());
+      n = Math.max(0, Math.min(n | 0, max));
+      var changed = n !== lobbyBots;
+      lobbyBots = n;
+      $('lobby-ai-n').textContent = String(n);
+      $('lobby-ai-minus').disabled = n <= 0;
+      $('lobby-ai-plus').disabled = n >= max;
+      if (changed && Game.Bots) {
+        botsConfigure(n, 'normal');
+        if (Net && typeof Net.setReserved === 'function') Net.setReserved(n); // 로비에서도 AI 자리는 비워 둠
+      }
     }
 
     function refreshLobby() {
       if (gameStarted) { cacheNames(); return; }
       if (hosting) {
-        var n = renderRoster($('host-roster'), $('host-count'));
-        btnStart.disabled = n < 2 || !(Net && Net.roomCode);
-        $('host-waiting').textContent = n < 2 ? '참가자를 기다리는 중…' : '준비되면 게임을 시작하세요';
+        if (Game.Bots) setLobbyBots(lobbyBots);
+        var n = renderRoster($('host-roster'), $('host-count'), Game.Bots ? lobbyBots : 0);
+        var ready = n >= 2 || (Game.Bots && lobbyBots > 0);
+        btnStart.disabled = !ready || !(Net && Net.roomCode);
+        $('host-waiting').textContent = !ready ? '참가자를 기다리는 중…' : '준비되면 게임을 시작하세요';
       } else if (!$('guest-wait').hidden) {
         renderRoster($('guest-roster'), $('guest-count'));
       }
@@ -1199,15 +1516,21 @@
       gameStarted = true;
       currentMode = mode;
       cacheNames();
+      hideQuick();
+      $('ai-modal').hidden = true;
       startScreen.hidden = true;
       lobby.hidden = true;
       result.hidden = true;
       hud.hidden = false;
       btnExit.hidden = false;
-      var practice = mode === 'practice';
-      $('scoreboard').hidden = practice;
-      $('killfeed').hidden = practice;
+      // 혼자 연습(AI 없음)만 점수판/킬 로그를 숨김
+      var solo = mode === 'practice' && !hasBots();
+      $('scoreboard').hidden = solo;
+      $('killfeed').hidden = solo;
       if (typeof Game.start === 'function') Game.start({ mode: mode, scores: scores || null });
+      if (Net && Net.isPublic && mode !== 'practice' && typeof Game.toast === 'function') {
+        Game.toast(publicLabel(Net.roomCode) + ' 입장', 'small');
+      }
     }
 
     function showLobby(which) {
@@ -1253,16 +1576,46 @@
         sub.textContent = subText || '';
       }
       renderStandings();
-      var canRematch = allowRematch && currentMode === 'host';
+      var canRematch = allowRematch && (currentMode === 'host' || (currentMode === 'practice' && hasBots()));
       btnRematch.hidden = !canRematch;
-      $('result-wait').hidden = !(allowRematch && currentMode === 'guest');
+      var wait = $('result-wait');
+      wait.textContent = '호스트가 다시 시작하기를 기다리는 중…';
+      wait.hidden = !(allowRematch && currentMode === 'guest');
+      clearInterval(autoRematchTimer);
+      autoRematchTimer = null;
+      // 공개 방 호스트: 잠시 뒤 자동으로 다음 판 (손님들이 결과 화면에 갇히지 않도록)
+      if (canRematch && currentMode === 'host' && Net && Net.isPublic) {
+        var left = 10;
+        wait.hidden = false;
+        wait.textContent = left + '초 뒤 다음 판이 자동으로 시작됩니다';
+        autoRematchTimer = setInterval(function () {
+          left--;
+          if (result.hidden) { clearInterval(autoRematchTimer); autoRematchTimer = null; return; }
+          if (left <= 0) { hostRematch(); return; }
+          wait.textContent = left + '초 뒤 다음 판이 자동으로 시작됩니다';
+        }, 1000);
+      }
       result.hidden = false;
     }
 
     function doRematch() {
       if (disconnected) return;
+      clearInterval(autoRematchTimer);
+      autoRematchTimer = null;
       result.hidden = true;
       if (typeof Game.restartMatch === 'function') Game.restartMatch();
+      // AI 는 다음 판에도 유지 (공개 방은 현재 인원 기준으로 다시 맞춤)
+      if (Game.Bots && (currentMode === 'host' || currentMode === 'practice')) {
+        var n = (currentMode === 'host' && Net && Net.isPublic) ? publicTarget() : wantedBots;
+        wantedBots = n;
+        if (botCount() !== n) botsSetCount(n);
+      }
+    }
+
+    function hostRematch() {
+      if (disconnected) return;
+      if (currentMode === 'host' && Net) Net.send({ t: 'rematch' });
+      doRematch();
     }
 
     // ---- 나가기 ----
@@ -1307,12 +1660,126 @@
     });
 
     $('btn-practice').addEventListener('click', function () {
+      wantedBots = 0;
+      if (Game.Bots) botsConfigure(0, 'normal');
       startGame('practice');
     });
+
+    // ---- AI 대전 ----
+    var aiN = 3;
+    var aiModal = $('ai-modal');
+    var diffBtns = aiModal.querySelectorAll('.seg button');
+    function renderAi() {
+      $('ai-n').textContent = String(aiN);
+      $('ai-minus').disabled = aiN <= 1;
+      $('ai-plus').disabled = aiN >= 7;
+      for (var i = 0; i < diffBtns.length; i++) {
+        diffBtns[i].setAttribute('aria-pressed', diffBtns[i].getAttribute('data-diff') === botDiff ? 'true' : 'false');
+      }
+    }
+    function closeAi() { aiModal.hidden = true; $('btn-ai').focus(); }
+    $('btn-ai').addEventListener('click', function () {
+      renderAi();
+      aiModal.hidden = false;
+      setTimeout(function () { $('btn-ai-go').focus(); }, 0);
+    });
+    $('ai-minus').addEventListener('click', function () { aiN = Math.max(1, aiN - 1); renderAi(); });
+    $('ai-plus').addEventListener('click', function () { aiN = Math.min(7, aiN + 1); renderAi(); });
+    Array.prototype.forEach.call(diffBtns, function (b) {
+      b.addEventListener('click', function () { botDiff = b.getAttribute('data-diff'); renderAi(); });
+    });
+    $('btn-ai-cancel').addEventListener('click', closeAi);
+    aiModal.addEventListener('click', function (e) { if (e.target === aiModal) closeAi(); });
+    $('btn-ai-go').addEventListener('click', function () {
+      if (gameStarted) return;
+      if (Game.Bots) {
+        wantedBots = aiN;
+        botsConfigure(aiN, botDiff);
+      } else {
+        wantedBots = 0; // bots.js 없음 → 혼자 연습으로
+      }
+      aiModal.hidden = true;
+      startGame('practice');
+      if (!Game.Bots && typeof Game.toast === 'function') Game.toast('AI 모듈을 불러오지 못해 혼자 연습으로 시작합니다', 'small');
+    });
+
+    // ---- 빠른 매칭 ----
+    var quickOverlay = $('quick-overlay');
+    function quickStatus(text, isError) {
+      var s = $('quick-status');
+      s.textContent = text;
+      s.className = isError ? 'error' : 'waiting';
+      $('quick-gear').classList.toggle('stop', !!isError);
+      $('btn-quick-retry').hidden = !isError;
+      $('btn-quick-cancel').textContent = isError ? '닫기' : '취소';
+    }
+    function hideQuick() {
+      quickActive = false;
+      clearTimeout(quickStartTimer);
+      quickStartTimer = null;
+      quickOverlay.hidden = true;
+    }
+    function quickFail(text) {
+      quickActive = false;
+      clearTimeout(quickStartTimer);
+      quickStartTimer = null;
+      if (Net) { try { Net.close(); } catch (e) {} }
+      quickStatus(text, true);
+    }
+    function runQuick() {
+      if (gameStarted) return;
+      quickOverlay.hidden = false;
+      quickStatus('공개 방을 찾는 중…', false);
+      setTimeout(function () { $('btn-quick-cancel').focus(); }, 0);
+      if (!Net || typeof Net.quickMatch !== 'function') { quickFail('네트워크 모듈을 불러오지 못했습니다.'); return; }
+      quickActive = true;
+      Net.quickMatch().then(function (r) {
+        if (!quickActive || gameStarted) return;
+        if (r.role === 'host') {
+          // 공개 방 호스트: 로비 없이 바로 시작, AI 로 4명까지 채움
+          wantedBots = Game.Bots ? publicTarget() : 0;
+          if (Game.Bots) botsConfigure(wantedBots, 'normal');
+          startGame('host');
+          publicFill();
+        } else {
+          // 진행 중인 판에 참가 — 호스트가 곧 start 를 보냄
+          wantedBots = 0;
+          quickStatus(publicLabel(r.code) + '에 입장하는 중…', false);
+          quickStartTimer = setTimeout(function () {
+            if (!gameStarted && quickActive) quickFail('방에서 응답이 없습니다. 다시 찾아 주세요.');
+          }, 10000);
+        }
+      }, function (e) {
+        if (!quickActive || (e && e.kind === 'cancel')) return;
+        quickFail(errText(e, '빠른 매칭에 실패했습니다.'));
+      });
+    }
+    function cancelQuick() {
+      var was = quickActive;
+      hideQuick();
+      if (was && Net) { try { Net.close(); } catch (e) {} }
+      $('btn-quick').focus();
+    }
+    $('btn-quick').addEventListener('click', runQuick);
+    $('btn-quick-retry').addEventListener('click', runQuick);
+    $('btn-quick-cancel').addEventListener('click', cancelQuick);
+
+    window.addEventListener('keydown', function (e) {
+      if (gameStarted || (e.key !== 'Escape' && e.code !== 'Escape')) return;
+      if (!quickOverlay.hidden) { e.preventDefault(); cancelQuick(); }
+      else if (!aiModal.hidden) { e.preventDefault(); closeAi(); }
+    });
+
+    // ---- 로비 AI 추가 ----
+    $('lobby-ai-minus').addEventListener('click', function () { setLobbyBots(lobbyBots - 1); refreshLobby(); });
+    $('lobby-ai-plus').addEventListener('click', function () { setLobbyBots(lobbyBots + 1); refreshLobby(); });
 
     $('btn-host').addEventListener('click', function () {
       showLobby('host');
       hosting = true;
+      lobbyBots = 0;
+      $('lobby-ai').hidden = !Game.Bots;
+      if (Game.Bots) { botsConfigure(0, 'normal'); setLobbyBots(0); }
       roomCodeEl.textContent = '·····';
       setMsg('방을 만드는 중…');
       refreshLobby();
@@ -1334,7 +1801,11 @@
 
     // ---- 로비 ----
     btnStart.addEventListener('click', function () {
-      if (!Net || gameStarted || peerList().length < 2) return;
+      if (!Net || gameStarted) return;
+      var withBots = Game.Bots ? lobbyBots : 0;
+      if (peerList().length < 2 && withBots < 1) return;
+      wantedBots = withBots;
+      if (Game.Bots) botsConfigure(withBots, 'normal');
       Net.send({ t: 'start' });
       startGame('host');
     });
@@ -1406,17 +1877,26 @@
         var id = e && e.detail ? e.detail.id : null;
         if (gameStarted && id != null) Net.send({ t: 'start', scores: Game.scores || {} }, id);
         refreshLobby();
-      } else if (!gameStarted) {
+      } else if (!gameStarted && !quickActive) {
         showGuestWait();
       }
     });
     ['net:roster', 'net:peerjoin'].forEach(function (ev) {
-      window.addEventListener(ev, function () { refreshLobby(); });
+      window.addEventListener(ev, function (e) {
+        refreshLobby();
+        if (ev !== 'net:peerjoin') return;
+        publicFill();
+        var d = (e && e.detail) || {};
+        if (gameStarted && currentMode !== 'practice' && d.id != null && d.id !== myId() && !isBotId(d.id) && typeof Game.toast === 'function') {
+          Game.toast((nameCache[d.id] || slotInfo(d.slot).name) + ' 님이 입장했습니다', 'small');
+        }
+      });
     });
 
     window.addEventListener('net:peerleave', function (e) {
       var id = e && e.detail ? e.detail.id : null;
       var name = nameCache[id];
+      publicFill();
       refreshLobby();
       if (gameStarted && currentMode !== 'practice' && id !== myId() && !disconnected) {
         if (typeof Game.toast === 'function') Game.toast((name || '참가자') + ' 님이 나갔습니다', 'small');
@@ -1443,6 +1923,8 @@
         disconnected = true;
         if (typeof Game.toast === 'function') Game.toast('호스트가 나갔습니다', 'small');
         showResult('호스트 연결 끊김', false, false, null, '방이 닫혔습니다.');
+      } else if (!gameStarted && quickActive) {
+        quickFail('공개 방과 연결이 끊겼습니다. 다시 찾아 주세요.');
       } else if (!gameStarted) {
         setMsg('연결이 끊겼습니다', true);
         if (!lobbyJoin.hidden) resetJoinForm();
@@ -1476,7 +1958,7 @@
     }
     if (Game.events && typeof Game.events.on === 'function') {
       Game.events.on('ko', function (d) {
-        if (!d || currentMode === 'practice') return;
+        if (!d || (currentMode === 'practice' && !hasBots())) return;
         var me = myId();
         var mine = d.by === me || d.victim === me;
         if (d.by != null) addFeed(nameSpan(d.by, d.byName) + ' ▸ ' + nameSpan(d.victim, d.victimName), mine);
@@ -1484,7 +1966,7 @@
       });
       Game.events.on('playerJoin', function (d) {
         if (d && d.name) nameCache[d.id] = d.name;
-        if (d && Game.time > 2 && typeof Game.toast === 'function') Game.toast(d.name + ' 님이 들어왔습니다', 'small');
+        // 입장 알림은 net:peerjoin 에서 (사람만)
       });
     }
 
@@ -1501,9 +1983,9 @@
 
     // ---- 결과 ----
     btnRematch.addEventListener('click', function () {
-      if (disconnected || currentMode !== 'host') return;
-      if (Net) Net.send({ t: 'rematch' });
-      doRematch();
+      if (disconnected) return;
+      if (currentMode !== 'host' && !(currentMode === 'practice' && hasBots())) return;
+      hostRematch();
     });
     $('btn-title').addEventListener('click', leaveRoom);
   })();

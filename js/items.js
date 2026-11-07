@@ -293,6 +293,25 @@
       }
     },
 
+    // 지정 위치에 아이템 생성 (권한측 전용; 보스 보상 등). dy = 땅 위 높이, type 생략 시 무작위.
+    // 최대 개수 제한(MAX_ITEMS)과 무관. 스냅샷으로 게스트에게 전파.
+    spawnAt: function (x, dy, type) {
+      if (!isAuthority()) return null;
+      var w = world();
+      var it = {
+        id: nextId++,
+        type: (type && TYPES[type]) ? type : pickType(),
+        x: Math.round(Math.max(SIZE, Math.min((w.width || 4200) - SIZE, +x || 0))),
+        dy: Math.max(0, +dy || 0),
+        fall: 240,              // 보스 몸에서 툭 떨어지는 연출
+        age: 0
+      };
+      Items.list.push(it);
+      particles(it.x, w.groundY - it.dy - 240, 10, (TYPES[it.type] || TYPES.heal).glow, 200);
+      sendSnapshot();
+      return it;
+    },
+
     _debug: { spawnOne: spawnOne, applyEffect: applyEffect }
   };
 
