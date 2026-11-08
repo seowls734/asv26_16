@@ -2396,7 +2396,7 @@
             // 보스 생존 중엔 일반 출현 쉼 (보스가 쥐/까마귀를 부름). 보스전 모드는 일반 출현 없음
             if (!findBoss() && !bossMode) spawnWave();
           }
-          bossSchedule(dt);
+          if (bossMode) bossSchedule(dt);   // 보스는 「보스전」 모드에서만 등장
         }
       }
 

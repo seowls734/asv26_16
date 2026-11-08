@@ -539,7 +539,13 @@
   function clampCamera() {
     var maxX = Math.max(0, G.world.width - G.width);
     G.camera.x = clamp(G.camera.x, 0, maxX);
-    G.camera.y = 0;
+    G.camera.y = clamp(G.camera.y || 0, -CAM_MAX_UP, 0);
+  }
+  // 세로 추적: 플레이어 머리가 화면 위쪽 30% 안으로 올라가면 카메라도 따라 올라감 (땅 아래로는 안 내려감)
+  var CAM_MAX_UP = 900;
+  function cameraTargetY(p) {
+    if (!p || !G.height) return 0;
+    return Math.min(0, p.y - G.height * 0.3);
   }
 
   // ===========================================================================
@@ -1215,6 +1221,7 @@
     var p = G.players.local;
     if (!p) return;
     G.camera.x = p.x + p.w / 2 - G.width / 2;
+    G.camera.y = cameraTargetY(p);
     clampCamera();
   }
 
@@ -1480,6 +1487,9 @@
     var look = p.facing * Math.min(110, G.width * 0.08);
     var target = p.x + p.w / 2 - G.width / 2 + look;
     G.camera.x += (target - G.camera.x) * (1 - Math.exp(-5 * dt));
+    var ty = cameraTargetY(p);
+    G.camera.y = (G.camera.y || 0) + (ty - (G.camera.y || 0)) * (1 - Math.exp(-8 * dt));
+    if (p.y - G.camera.y < 50) G.camera.y = Math.min(0, p.y - 50);   // 머리가 화면 밖으로 나가지 않게
     clampCamera();
   }
 
@@ -3476,7 +3486,7 @@
       for (var li = 0; li < farLayers.length; li++) {
         var ly = farLayers[li];
         var lx = -snapPx(G.camera.x * ly.f) - 120;
-        c.drawImage(ly.cv, lx, 0, ly.w, ly.h);
+        c.drawImage(ly.cv, lx, -snapPx((G.camera.y || 0) * ly.f), ly.w, ly.h);
         if (li === 0) drawMotes(c, W, H, false);
       }
       c.restore();
