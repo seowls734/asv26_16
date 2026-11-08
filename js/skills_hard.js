@@ -462,7 +462,24 @@
   // ================================================================ 3. 시간 정지
   var TS_LIFE = 5, TS_MUT = 5, TS_PLAYER = 4.5, TS_COL = '#6fd8ff', TS_R = 99999;
   // 시간이 다시 흐르는 순간 주변(반경 TS_DMG_R)의 적에게 한꺼번에 피해
-  var TS_DMG_AT = TS_LIFE - 0.3, TS_DMG_R = 900, TS_DMG_M = 35, TS_DMG_P = 15;
+  var TS_DMG_AT = TS_LIFE - 0.3, TS_DMG_R = 900, TS_DMG_M = 50, TS_DMG_P = 20;
+
+  // 시간 정지 종료 폭발 (시각 효과 전용 fx — 피해 없음)
+  function boomRender(fx, ctx) {
+    var q = clamp(fx.t / fx.life, 0, 1), r = fx.r * (0.25 + 0.75 * ease(q * 1.6));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glow(ctx, fx.x, fx.y, r, [[0, 'rgba(255,255,240,' + (1 - q) + ')'], [0.35, 'rgba(255,200,90,' + (0.9 * (1 - q)) + ')'], [0.7, 'rgba(255,90,30,' + (0.6 * (1 - q)) + ')'], [1, 'rgba(120,200,255,0)']]);
+    ctx.strokeStyle = 'rgba(255,230,160,' + (1 - q) + ')';
+    ctx.lineWidth = 10 * (1 - q) + 1;
+    ctx.beginPath(); ctx.arc(fx.x, fx.y, r * 1.15, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
+  function boom(fx, x, y, r) {
+    S.addFx({ skill: 'timestop_boom', owner: fx.owner, castId: fx.castId, casterId: fx.casterId,
+      x: x, y: y, r: r, t: 0, life: 0.7, render: boomRender });
+    burst(x, y, Math.round(r / 6), ['#ffffff', '#ffe08a', '#ff9a3a', '#ff4a1a', TS_COL], r * 4);
+  }
   var ROMAN = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
 
   function tsAlpha(t) {
@@ -485,10 +502,23 @@
       fx.resumed = true;
       fx.resumeT = fx.t;
       var kn = function (e, dx, dy, dist) { var n = dist || 1; return { kx: dx / n * 360, ky: -320 }; };
+      // 폭발 연출: 시전자 중심 큰 폭발 + 범위 안의 멈춰 있던 적마다 폭발 (모든 클라이언트)
+      boom(fx, cc.x, cc.y, 260);
+      var ml = (G.Mutants && G.Mutants.list) || [];
+      for (var bi = 0; bi < ml.length; bi++) {
+        var bm = ml[bi];
+        if (!alive(bm) || bm.under) continue;
+        var bc = center(bm), bdx = bc.x - cc.x, bdy = bc.y - cc.y;
+        if (bdx * bdx + bdy * bdy <= TS_DMG_R * TS_DMG_R) boom(fx, bc.x, bc.y, Math.max(90, Math.min(220, (bm.w || 40) * 1.2)));
+      }
+      var lpb = G.players && G.players.local;
+      if (fx.owner === 'remote' && lpb && alive(lpb)) {
+        var lc = center(lpb), ldx = lc.x - cc.x, ldy = lc.y - cc.y;
+        if (ldx * ldx + ldy * ldy <= TS_DMG_R * TS_DMG_R) boom(fx, lc.x, lc.y, 110);
+      }
       S.hitMutantsCircle(fx, cc.x, cc.y, TS_DMG_R, TS_DMG_M, kn);
       S.hitPlayerCircle(fx, cc.x, cc.y, TS_DMG_R, TS_DMG_P, kn);
-      shake(16);
-      burst(cc.x, cc.y, 40, ['#ffffff', '#bff0ff', TS_COL, '#ffe08a'], 900);
+      shake(28);
     }
     // 세상의 파티클이 멈춘 듯이 (시각 효과 전용)
     if (fx.t < TS_LIFE - 0.3 && G.particles && G.particles.length) {
@@ -635,7 +665,7 @@
   S.register({
     id: 'timestop', element: 'time', elementName: '시간', name: '시간 정지', icon: '⏳',
     rarity: 'hard', cost: 80, cooldown: 20, color: TS_COL,
-    desc: '5초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다. 시간이 다시 흐르는 순간 주변의 적이 한꺼번에 피해를 받습니다.',
+    desc: '5초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다. 시간이 다시 흐르는 순간 대폭발이 일어나 주변의 적이 모두 터집니다.',
     cast: function (ctx) {
       var p = ctx.p;
       var cx = p ? ctx.x + p.w / 2 : ctx.x, cy = p ? ctx.y + p.h / 2 : ctx.y;
