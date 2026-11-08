@@ -762,6 +762,7 @@
     for (i = 0; i < arr.length; i++) {
       var s = arr[i];
       if (!s || !TYPES[s.type]) continue;
+      if (TYPES[s.type].boss && !bossMode) continue;   // 보스전이 아니면 보스 무시 (구버전 호스트 대비)
       m = byId[s.id];
       if (!m) {
         m = makeMutant(s.type, s.id, s.x, s.y + gyOff);
@@ -1036,6 +1037,7 @@
     var G0 = gy();
     var k = msg.kind;
     var i;
+    if (!bossMode) return;   // 보스전이 아니면 보스 연출·피해 모두 무시
     if (k === 'warn') {
       warnT = BOSS.warn;
       warnType = TYPES[msg.type] && TYPES[msg.type].boss ? msg.type : 'behemoth';
@@ -1219,7 +1221,7 @@
   }
 
   function spawnBoss(x, instant, type) {
-    if (!isAuthority()) return null;
+    if (!isAuthority() || !bossMode) return null;   // 보스는 「보스전」 모드에서만
     var old = findBoss();
     if (old) return old;
     if (!TYPES[type] || !TYPES[type].boss) type = nextBossType();

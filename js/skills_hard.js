@@ -460,7 +460,7 @@
   });
 
   // ================================================================ 3. 시간 정지
-  var TS_LIFE = 5, TS_MUT = 5, TS_PLAYER = 4.5, TS_COL = '#6fd8ff', TS_R = 99999;
+  var TS_LIFE = 3, TS_MUT = 3, TS_PLAYER = 2.5, TS_COL = '#6fd8ff', TS_R = 99999;
   var ROMAN = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
 
   function tsAlpha(t) {
@@ -612,7 +612,7 @@
   S.register({
     id: 'timestop', element: 'time', elementName: '시간', name: '시간 정지', icon: '⏳',
     rarity: 'hard', cost: 80, cooldown: 20, color: TS_COL,
-    desc: '5초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다. 멈춘 동안 내 기술은 쿨타임과 에너지 소모가 없습니다.',
+    desc: '3초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다.',
     cast: function (ctx) {
       var p = ctx.p;
       var cx = p ? ctx.x + p.w / 2 : ctx.x, cy = p ? ctx.y + p.h / 2 : ctx.y;
