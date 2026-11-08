@@ -460,7 +460,9 @@
   });
 
   // ================================================================ 3. 시간 정지
-  var TS_LIFE = 3, TS_MUT = 3, TS_PLAYER = 2.5, TS_COL = '#6fd8ff', TS_R = 99999;
+  var TS_LIFE = 5, TS_MUT = 5, TS_PLAYER = 4.5, TS_COL = '#6fd8ff', TS_R = 99999;
+  // 시간이 다시 흐르는 순간 주변(반경 TS_DMG_R)의 적에게 한꺼번에 피해
+  var TS_DMG_AT = TS_LIFE - 0.3, TS_DMG_R = 900, TS_DMG_M = 35, TS_DMG_P = 15;
   var ROMAN = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
 
   function tsAlpha(t) {
@@ -477,6 +479,16 @@
       S.statusPlayerCircle(fx, cc.x, cc.y, TS_R, 'stun', TS_PLAYER);
       shake(10);
       burst(cc.x, cc.y, 30, ['#ffffff', '#bff0ff', TS_COL, '#ffe08a'], 600);
+    }
+    // 시간 재개: 멈춰 있던 적들이 한꺼번에 피해를 받음
+    if (!fx.resumed && fx.t >= TS_DMG_AT) {
+      fx.resumed = true;
+      fx.resumeT = fx.t;
+      var kn = function (e, dx, dy, dist) { var n = dist || 1; return { kx: dx / n * 360, ky: -320 }; };
+      S.hitMutantsCircle(fx, cc.x, cc.y, TS_DMG_R, TS_DMG_M, kn);
+      S.hitPlayerCircle(fx, cc.x, cc.y, TS_DMG_R, TS_DMG_P, kn);
+      shake(16);
+      burst(cc.x, cc.y, 40, ['#ffffff', '#bff0ff', TS_COL, '#ffe08a'], 900);
     }
     // 세상의 파티클이 멈춘 듯이 (시각 효과 전용)
     if (fx.t < TS_LIFE - 0.3 && G.particles && G.particles.length) {
@@ -605,6 +617,17 @@
     glow(ctx, 0, 0, 22, [[0, 'rgba(255,255,255,1)'], [0.5, 'rgba(160,230,255,0.6)'], [1, 'rgba(80,180,255,0)']]);
     // 시전자 주변은 시간이 흐른다 — 밝은 청록 오라
     glow(ctx, 0, 0, 70 + 6 * Math.sin(t * 12), [[0, 'rgba(180,250,255,0.35)'], [1, 'rgba(80,200,255,0)']]);
+    // 시간 재개 충격파 (피해 범위)
+    if (fx.resumed) {
+      var rq = clamp((t - fx.resumeT) / 0.3, 0, 1);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(255,240,190,' + (1 - rq) + ')';
+      ctx.lineWidth = 18 * (1 - rq) + 2;
+      ctx.beginPath(); ctx.arc(0, 0, 40 + rq * TS_DMG_R, 0, TAU); ctx.stroke();
+      ctx.strokeStyle = 'rgba(140,220,255,' + (0.8 * (1 - rq)) + ')';
+      ctx.lineWidth = 6 * (1 - rq) + 1;
+      ctx.beginPath(); ctx.arc(0, 0, 20 + rq * TS_DMG_R * 0.8, 0, TAU); ctx.stroke();
+    }
     ctx.lineCap = 'butt';
     ctx.restore();
   }
@@ -612,7 +635,7 @@
   S.register({
     id: 'timestop', element: 'time', elementName: '시간', name: '시간 정지', icon: '⏳',
     rarity: 'hard', cost: 80, cooldown: 20, color: TS_COL,
-    desc: '3초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다.',
+    desc: '5초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다. 시간이 다시 흐르는 순간 주변의 적이 한꺼번에 피해를 받습니다.',
     cast: function (ctx) {
       var p = ctx.p;
       var cx = p ? ctx.x + p.w / 2 : ctx.x, cy = p ? ctx.y + p.h / 2 : ctx.y;
