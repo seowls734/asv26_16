@@ -129,6 +129,7 @@
     '  border-color: rgba(255,170,90,0.8); font-size: 30px; }',
     '#tc-jump.tc-pressed { box-shadow: 0 0 16px rgba(255,138,42,0.75), inset 0 0 14px rgba(255,200,140,0.4); }',
     '.tc-skill .tc-ico { font-size: 26px; line-height: 1; position: relative; z-index: 2; }',
+    '.tc-skill .tc-ico .sk-svg { width: 30px; height: 30px; display: block; filter: drop-shadow(0 0 4px currentColor); }',
     '.tc-skill .tc-key { position: absolute; z-index: 3; left: 0; right: 0; bottom: 5px; text-align: center;',
     '  font-size: 10px; letter-spacing: 0.5px; color: rgba(239,230,216,0.8); text-shadow: 0 1px 2px #000; }',
     '.tc-skill .tc-cd { position: absolute; z-index: 1; left: 0; right: 0; bottom: 0; height: 0;',
@@ -445,7 +446,9 @@
       var s = skillBtns[i], id = slots[i] || null;
       var def = getDef(id);
       s.id = id;
-      s.ico.textContent = def ? (def.icon || '✦') : '';
+      var svg = def && G.SkillIcons ? G.SkillIcons.svg(def.id || id, def.element) : null;
+      if (svg) { s.ico.innerHTML = svg; s.ico.style.color = def.color || ''; }
+      else { s.ico.textContent = def ? (def.icon || '✦') : ''; s.ico.style.color = ''; }
       s.el.title = def ? (def.name + ' (' + SKILL_KEYS[i] + ')') : '';
       s.el.setAttribute('data-skill', id || '');
       s.el.classList.toggle('tc-empty', !def);

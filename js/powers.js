@@ -1448,7 +1448,8 @@
       '.pw-key{position:absolute;top:3px;left:3px;min-width:16px;height:16px;padding:0 3px;box-sizing:border-box;',
       'border-radius:5px;background:linear-gradient(#fff3d6,rgb(var(--pc)));color:#1e0e04;font-size:11px;font-weight:900;line-height:16px;text-align:center;z-index:3;}',
       '.pw-cost{position:absolute;top:3px;right:4px;font-size:10px;font-weight:800;color:rgb(var(--pl));text-shadow:0 0 3px #000;z-index:3;}',
-      '.pw-icon{font-size:23px;line-height:1;margin-top:8px;filter:drop-shadow(0 0 5px rgba(var(--pc),.9));z-index:1;}',
+      '.pw-icon{font-size:23px;line-height:1;margin-top:8px;filter:drop-shadow(0 0 5px rgba(var(--pc),.9));z-index:1;color:rgb(var(--pl));}',
+      '.pw-icon .sk-svg{width:26px;height:26px;display:block;}',
       '.pw-name{font-size:10.5px;font-weight:800;margin-top:4px;letter-spacing:-.3px;white-space:nowrap;color:rgb(var(--pl));z-index:1;}',
       '.pw-cd{position:absolute;left:0;right:0;bottom:0;height:0;background:rgba(6,4,2,.75);z-index:2;pointer-events:none;',
       'border-top:1px solid rgba(var(--pc),.6);}',
@@ -1505,7 +1506,7 @@
         root.innerHTML =
           '<span class="pw-key">' + KEY_LABELS[i] + '</span>' +
           '<span class="pw-cost">' + escapeHtml(d.cost) + '</span>' +
-          '<span class="pw-icon">' + escapeHtml(d.icon) + '</span>' +
+          '<span class="pw-icon">' + ((G.SkillIcons && G.SkillIcons.svg(d.id, d.element)) || escapeHtml(d.icon)) + '</span>' +
           '<span class="pw-name">' + escapeHtml(d.name) + '</span>' +
           '<div class="pw-cd"></div>' +
           '<div class="pw-num"></div>';
