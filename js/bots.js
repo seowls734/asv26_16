@@ -1,3 +1,5 @@
+
+
 /* 초능력자: 각성 — AI 봇 (Game.Bots)  v5
  * 봇은 권한측(연습 / 온라인 호스트)에서만 시뮬레이션되는 '플레이어'다.
  *  - G.players.others 에 id 'b1'..'b7', isBot: true, _sim: true 로 들어간다 (점수판/3D/기술이 플레이어처럼 취급)
@@ -59,7 +61,11 @@
     timestop: { k: 'aoe', r: 380, dy: 300 }, time_bolt: { k: 'proj', r: 600 },
     time_rewind: { k: 'skip' }, time_hands: { k: 'aoe', r: 170 },
     dragonsummon: { k: 'map' }, dragon_claw: { k: 'melee', r: 110 },
-    dragon_wing: { k: 'dash', r: 330, hit: true }, dragon_breath: { k: 'fwd', min: 0, r: 260 }
+    dragon_wing: { k: 'dash', r: 330, hit: true }, dragon_breath: { k: 'fwd', min: 0, r: 260 },
+    ghost_orb: { k: 'proj', r: 560, dy: 120 }, ghost_phase: { k: 'buff' },
+    ghost_possess: { k: 'dash', r: 340, hit: true }, ghost_wail: { k: 'aoe', r: 330, dy: 220 },
+    scythe_slash: { k: 'melee', r: 130, dy: 80 }, scythe_spin: { k: 'aoe', r: 125, dy: 90 },
+    scythe_rift: { k: 'proj', r: 480, dy: 90 }, scythe_reap: { k: 'fwd', min: 0, r: 620, dy: 170 }
   };
   var DEFAULT_SK = [{ k: 'proj', r: 450 }, { k: 'fwd', min: 40, r: 280 }, { k: 'fwd', min: 40, r: 300 }, { k: 'aoe', r: 230 }];
   // 표에 없는 기술: def.ai 힌트 {kind:'proj'|'melee'|'dash'|'buff'|'zone'|'summon', range} → 위 형식으로 변환 (캐시)
@@ -305,7 +311,7 @@
   function mutantTargets() {
     var l = (G.Mutants && G.Mutants.list) || [];
     var out = [];
-    for (var i = 0; i < l.length; i++) { if (alive(l[i])) { out.push(l[i]); } }
+    for (var i = 0; i < l.length; i++) { if (alive(l[i]) && !l[i].under) { out.push(l[i]); } }   // 땅속 두더지 제외
     return out;
   }
   function chooseTarget(bot, D) {

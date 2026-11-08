@@ -30,7 +30,7 @@
   function byId(id) { return typeof S.playerById === 'function' ? S.playerById(id) : null; }
   function isMe(id) { return typeof S.isMe === 'function' ? S.isMe(id) : false; }
   function isAlive(e) { return !!e && e.alive !== false; }
-  function mutList() { return (G.Mutants && G.Mutants.list) || []; }
+  function mutList() { return ((G.Mutants && G.Mutants.list) || []).filter(function (q) { return !(q && q.under); }); }
   function findMutant(id) {
     var L = mutList();
     for (var i = 0; i < L.length; i++) { if (L[i] && L[i].id === id && L[i].alive !== false) { return L[i]; } }

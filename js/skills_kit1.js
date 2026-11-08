@@ -43,7 +43,7 @@
   function localP() { return (G.players && G.players.local) || null; }
   function othersP() { return typeof S.remotePlayers === 'function' ? S.remotePlayers() : []; }
   function isAlive(e) { return !!e && e.alive !== false; }
-  function mutList() { return (G.Mutants && G.Mutants.list) || []; }
+  function mutList() { return ((G.Mutants && G.Mutants.list) || []).filter(function (q) { return !(q && q.under); }); }
   function rectsHit(a, b) {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   }

@@ -31,7 +31,7 @@
   function localP() { return (G.players && G.players.local) || null; }
   function playerById(id) { return typeof S.playerById === 'function' ? S.playerById(id) : null; }
   function findMutant(id) {
-    var l = (G.Mutants && G.Mutants.list) || [];
+    var l = ((G.Mutants && G.Mutants.list) || []).filter(function (q) { return !(q && q.under); });
     for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i];
     return null;
   }
@@ -76,7 +76,7 @@
     if (fx._pov && !fx._cs) return false;
     return true;
   }
-  function mutList() { return (G.Mutants && G.Mutants.list) || []; }
+  function mutList() { return ((G.Mutants && G.Mutants.list) || []).filter(function (q) { return !(q && q.under); }); }
 
   // ------------------------------------------------------------ fx 파티클
   function pAdd(fx, x, y, vx, vy, life, size, col, drag, grav) {

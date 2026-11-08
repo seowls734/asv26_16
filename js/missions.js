@@ -31,7 +31,9 @@
     dragonsummon: { element: 'dragon', elementName: '용족', name: '용족 소환', icon: '🐉', color: '#ff9a3a' },
     sum_guardian: { element: 'summon', elementName: '소환자', name: '수호 거신', icon: '🗽', color: '#5fe6d0' },
     steel_skin: { element: 'steel', elementName: '강철', name: '강철 피부', icon: '🛡️', color: '#b8c6d4' },
-    shield_dome: { element: 'shield', elementName: '쉴드', name: '수호 돔', icon: '⛺', color: '#ffd35a' }
+    shield_dome: { element: 'shield', elementName: '쉴드', name: '수호 돔', icon: '⛺', color: '#ffd35a' },
+    ghost_wail: { element: 'ghost', elementName: '유령', name: '망령의 울부짖음', icon: '👻', color: '#b8c8ff' },
+    scythe_reap: { element: 'scythe', elementName: '시간의 낫', name: '영혼 수확', icon: '🌙', color: '#ffd27a' }
   };
   // 능력(원소) 폴백 목록 — Game.Skills.kits 가 없을 때
   var ELEMENT_FALLBACK = [
@@ -44,7 +46,9 @@
     ['time', '시간', '⏳', '#7ad0ff', 'hard', ['timestop']], ['dragon', '용족', '🐉', '#ff9a3a', 'hard', ['dragonsummon']],
     ['summon', '소환자', '🧿', '#5fe6d0', 'hard', ['sum_drone', 'sum_wolf', 'sum_golem', 'sum_guardian']],
     ['steel', '강철', '⚙️', '#b8c6d4', 'hard', ['steel_fist', 'steel_skin', 'steel_rail', 'steel_girder']],
-    ['shield', '쉴드', '🔰', '#ffd35a', 'hard', ['shield_bash', 'shield_reflect', 'shield_dome', 'shield_fortress']]
+    ['shield', '쉴드', '🔰', '#ffd35a', 'hard', ['shield_bash', 'shield_reflect', 'shield_dome', 'shield_fortress']],
+    ['ghost', '유령', '👻', '#b8c8ff', 'hard', ['ghost_orb', 'ghost_phase', 'ghost_possess', 'ghost_wail']],
+    ['scythe', '시간의 낫', '🌙', '#ffd27a', 'hard', ['scythe_slash', 'scythe_spin', 'scythe_rift', 'scythe_reap']]
   ];
 
   // ===========================================================================
@@ -60,26 +64,41 @@
     { id: 'm_survive', name: '사막의 인내', desc: '혼자 연습에서 KO 없이 3분 생존 (한 출전 내)', goal: 180, reward: 'sandstorm', timed: true, onlyMode: 'practice' },
     { id: 'm_duel', name: '결투가', desc: '온라인 대전에서 다른 플레이어를 3번 KO (누적)', goal: 3, reward: 'bodyboost', onlyMode: 'online' },
     { id: 'h_flawless', hidden: true, name: '무결점', hint: '상처 하나 없는 자만이 마음으로 사물을 움직인다.',
+      riddle: '스물다섯 개의 숨이 차례로 끊어지는 동안\n네 살갗엔 긁힌 자국 하나 없어야 하리.\n피 한 방울이 떨어지면 셈은 다시 하나부터 —\n흠 없는 마음만이 손대지 않고 사물을 움직인다.',
       desc: '피해를 한 번도 받지 않고 돌연변이 25마리 연속 처치', goal: 25, reward: 'psychograb',
       how: '돌연변이를 25마리 연속으로 처치하세요. 도중에 피해를 한 번이라도 받으면 진행도가 0으로 돌아갑니다. 경기가 바뀌어도 진행도는 이어집니다.' },
     { id: 'h_bigbang', hidden: true, name: '대폭발', hint: '한 번의 불꽃으로 무리를 삼켜라.',
+      riddle: '가장 큰 불꽃은 단 한 번 피어난다.\n네 개의 그림자가 한자리에 모였을 때\n그 한가운데서 마지막 불꽃(I)을 터뜨려라.\n한꺼번에 재가 된 별들이 어둠의 구멍을 연다.',
       desc: '인페르노 한 방으로 돌연변이 4마리 이상 처치', goal: 4, reward: 'blackhole',
       how: '🔥 불꽃 능력을 장착하고, 돌연변이 4마리 이상이 모였을 때 한가운데서 인페르노(I 키)를 터뜨리세요. 한 번의 인페르노로 4마리를 처치해야 합니다.' },
     { id: 'h_clock', hidden: true, name: '멈춘 시계', hint: '무너진 시계탑은 정확한 박자를 기억한다.',
+      riddle: '부서진 탑 꼭대기, 금이 간 얼굴 하나\n네 시 사십칠 분에 심장이 멎은 채 잠들었네.\n손이 닿지 않거든 멀리서 세 번 그 뺨을 두드려라.\n깨어난 바늘이 멈춘 시간을 너에게 건네리라.',
       desc: '무너진 시계탑의 시계판에 투사체를 3번 맞히기', goal: 3, reward: 'timestop',
       how: '시계탑은 맵 중앙의 버스·광고판 바로 왼쪽에 있습니다. 시계판을 향해 화염구 같은 투사체를 3번 맞히면 됩니다. 박자나 간격은 상관없고, 땅에서 쏘기 어려우면 광고판 위에 올라가서 쏘세요.' },
     { id: 'h_dragon', hidden: true, name: '용의 시련', hint: '세 개의 비석, 발톱 자국의 수를 세어라.',
+      riddle: '세상의 서쪽 끝, 가장 높은 길 위, 동쪽 끝 —\n세 개의 비석이 발톱 자국을 품고 잠들었다.\n하나, 둘, 셋, 그 수를 따라 무릎 꿇고 두 숨을 기다려라.\n깨어난 용은 아흔 번의 숨 안에 열다섯의 피를 원하리니.',
       desc: '숨겨진 용 비석 3개를 발톱 수 순서대로 깨우고, 시련(90초 안에 돌연변이 15마리)을 통과', goal: 15, reward: 'dragonsummon',
       how: '혼자 연습에서만 할 수 있습니다. 비석 위에 서서 아래 키(S/↓)를 2초 동안 누르면 비석이 깨어납니다. 순서는 ① 발톱 1개: 맵 맨 왼쪽 끝 바닥 → ② 발톱 2개: 왼쪽 고가도로(가장 높은 발판) 위 오른쪽 끝 → ③ 발톱 3개: 맵 맨 오른쪽 끝 바닥입니다. 순서가 틀리면 모두 꺼집니다. 셋을 다 깨우면 시련이 시작되고, 90초 안에 돌연변이 15마리를 처치해야 합니다.' },
     { id: 'h_summon', hidden: true, name: '두 군주의 계약', hint: '녹슨 짐승과 이끼의 여왕, 둘 모두를 꺾은 자에게 영혼이 응답한다.',
+      riddle: '녹슨 쇳덩이 짐승과 이끼 옷을 입은 여왕,\n두 왕관이 땅에 떨어지는 것을 지켜보아라.\n단, 그 몸에 네 손길이 한 번은 닿았어야 하리.\n두 군주의 몰락을 증명한 자에게 영혼이 무릎 꿇는다.',
       desc: '서로 다른 보스 2종(녹슨 거수 · 이끼 여왕)을 각각 한 번씩 쓰러뜨리기 (누적, 그 보스에게 기술을 1번 이상 맞혀야 인정)', goal: 2, reward: 'sum_guardian',
       how: '보스는 일반 경기에서 시작 90초 뒤 처음 나오고(첫 보스는 녹슨 거수), 쓰러진 뒤 180초마다 종류를 바꿔 다시 나옵니다. 「보스전」 모드에서는 5초 뒤부터 녹슨 거수 → 이끼 여왕 순서로 계속 나와 가장 빠릅니다. 보스가 살아 있는 동안 아무 기술로나 그 보스를 최소 1번 맞히고, 그 보스가 쓰러지면(누가 막타를 쳐도 됨) 그 종류가 인정됩니다. 녹슨 거수와 이끼 여왕을 모두 인정받으면 클리어. 경기가 바뀌어도 인정된 종류는 남습니다.' },
     { id: 'h_steel', hidden: true, name: '강철 심장', hint: '쓰러지지 않는 몸은 강철로 벼려진다.',
+      riddle: '강철은 망치질 속에서만 태어난다.\n네 그릇(100)보다 큰 고통, 백팔십을 삼키되\n단 한 번도 무너지지 마라 — 쓰러지면 다시 쇳물이니.\n상처를 메우며 버틴 몸만이 강철의 심장을 얻는다.',
       desc: '한 목숨으로(KO 없이) 누적 피해 180 받기', goal: 180, reward: 'steel_skin',
       how: '경기 중 한 번도 KO 되지 않은 채로 받은 피해의 합이 180이 되어야 합니다 (최대 체력은 100). 회복 키트(빨간 상자, +35)를 줍거나 회복 기술(풀 · 시간 · 쉴드의 수호 돔 등)로 체력을 채우며 버티세요. 보스와 돌연변이 무리 근처에서 버티면 빨리 쌓입니다. KO 되거나 새 경기를 시작하면 진행도가 0으로 돌아갑니다. 강화 혈청의 피해 감소로 줄어든 피해는 줄어든 만큼만 셉니다.' },
     { id: 'h_shield', hidden: true, name: '이끼 수호자', hint: '이끼의 가호가 머무는 찰나에 적을 베어라.',
+      riddle: '하늘에서 초록 장막이 떨어져 내린다.\n그것이 너를 감싸는 세 번의 숨 동안\n네 손으로 괴물의 숨 하나를 거두어라.\n세 번의 가호를 모은 자, 스스로 방패가 되리라.',
       desc: '이끼 보호막 아이템을 주운 뒤 보호막이 켜진 3초 안에 돌연변이 처치하기 — 3번 (누적)', goal: 3, reward: 'shield_dome',
-      how: '아이템은 경기 시작 6초 뒤부터 10~15초마다 하늘에서 떨어집니다. 그중 초록빛의 「이끼 보호막」(3초 무적)을 주운 뒤, 3초 안에 돌연변이(종류 무관, 보스 포함)를 직접 처치(막타)하세요. 보호막 1번당 1회만 인정되고 3번 모으면 클리어. 돌연변이 무리 근처에 떨어진 보호막을 노리거나, 체력이 낮은 돌연변이를 남겨 두었다가 줍자마자 마무리하세요.' }
+      how: '아이템은 경기 시작 6초 뒤부터 10~15초마다 하늘에서 떨어집니다. 그중 초록빛의 「이끼 보호막」(3초 무적)을 주운 뒤, 3초 안에 돌연변이(종류 무관, 보스 포함)를 직접 처치(막타)하세요. 보호막 1번당 1회만 인정되고 3번 모으면 클리어. 돌연변이 무리 근처에 떨어진 보호막을 노리거나, 체력이 낮은 돌연변이를 남겨 두었다가 줍자마자 마무리하세요.' },
+    { id: 'h_ghost', hidden: true, name: '떠도는 혼', hint: '죽음에서 돌아온 숨으로 산 것을 데려가라.',
+      riddle: '한 번 쓰러져 본 자만이 넘는 문턱이 있다.\n저승에서 돌아온 숨이 채 식기 전에,\n다섯을 세기 전에 산 것 하나를 데려가라.\n세 번 돌아오고 나면, 너는 이미 혼이니.',
+      desc: 'KO 당한 뒤 부활하고 5초 안에 돌연변이 처치하기 — 3번 (누적)', goal: 3, reward: 'ghost_wail',
+      how: '어떤 모드에서든 KO 된 뒤 다시 살아나면(부활) 5초의 「저승의 숨」 시간이 열립니다. 그 5초 안에 돌연변이(종류 무관, 보스 포함)를 직접 처치(막타)하세요. 부활 1번당 1회만 인정되고 3번 모으면 클리어. 돌연변이 무리 근처에서 쓰러지면 부활 지점 근처에 적이 남아 있어 쉽습니다. 부활 직후 1.5초 무적도 활용하세요.' },
+    { id: 'h_scythe', hidden: true, name: '시계탑 뒤의 낫', hint: '멈춘 시계가 다시 뛰면, 그 등 뒤를 보라.',
+      riddle: '멈춘 시계가 다시 숨을 쉬는 날,\n탑의 등 뒤 그늘진 발치를 살펴라.\n시간을 베던 낫이 금빛 꿈을 꾸고 있으니\n무릎 꿇고 두 번 숨 쉬는 동안 손을 내밀어라.',
+      desc: '「멈춘 시계」를 클리어한 뒤, 시계탑 뒤쪽 받침대 발치에서 아래 키를 2초 동안 누르기', goal: 1, reward: 'scythe_reap',
+      how: '먼저 히든 미션 「멈춘 시계」를 클리어해야 합니다(그전에는 아무것도 보이지 않아요). 클리어 후 시계탑(맵 중앙 버스·광고판 바로 왼쪽) 오른쪽 아래 받침대 발치에 희미한 금빛 반짝임이 나타납니다. 그 위 바닥에 서서 아래 키(S/↓)를 2초 동안 누르면 전설의 무기 「시간의 낫」을 손에 넣습니다. 어떤 모드에서든 가능합니다.' }
   ];
   var DEF_BY_ID = {};
   var REWARD_TO_MISSION = {};
@@ -352,6 +371,11 @@
   var bossHit = {};      // 보스 종류 → 이번 개체에 내 기술이 맞았는가 (h_summon)
   var shieldWin = { until: -1, used: true };   // 이끼 보호막 유효 시간 (h_shield)
   var SHIELD_WINDOW = 3.2;
+  // h_ghost: KO → 부활 직후 5초 창
+  var GHOST_WINDOW = 5.2;
+  var ghostWin = { pendingKO: false, until: -1, used: true, wasAlive: true };
+  // h_scythe: 시계탑 뒤 낫 (h_clock 완료 후)
+  var scythe = { hold: 0, lock: false, flash: 0, reveal: 0 };
 
   // ---- 이끼 뭉치: 맵 고정 8곳 (dy = 지면 위 높이, 발판 위면 발판 윗면 높이) ----
   var MOSS_SPOTS = [
@@ -442,6 +466,8 @@
     simT = 0;
     bossHit = {};
     shieldWin = { until: -1, used: true };
+    ghostWin = { pendingKO: false, until: -1, used: true, wasAlive: true };
+    scythe = { hold: 0, lock: false, flash: 0, reveal: 0 };
     resetSteel();
     buildMoss();
     buildStones();
@@ -532,6 +558,8 @@
       runT.m_survive = 0;
       resetFlawless();
       resetSteel();
+      ghostWin.pendingKO = true;
+      ghostWin.used = true;
       if (trial) failTrial('KO 당했습니다');
     });
     on.call(G.events, 'oppKO', function () {
@@ -598,6 +626,16 @@
   function onMutantKilled(d) {
     d = d || {};
     if (!shieldWin.used && simT <= shieldWin.until) { shieldWin.used = true; addProgress('h_shield', 1); }
+    if (!ghostWin.used && simT <= ghostWin.until) {
+      ghostWin.used = true;
+      var gs = mstate('h_ghost');
+      if (!gs.done) {
+        addProgress('h_ghost', 1);
+        var gp = localPlayer();
+        if (gp) particles(gp.x + gp.w / 2, gp.y + gp.h / 2, 22, '#b8c8ff', 300);
+        if (!gs.done) toast('👻 저승에서 돌아온 혼이 생명을 거두었다… (' + gs.progress + '/' + goalOf(DEF_BY_ID.h_ghost) + ')');
+      }
+    }
     addProgress('m_hunt', 1);
     if (d.type === 'dog') addProgress('m_dog', 1);
     addProgress('h_flawless', 1);
@@ -784,6 +822,144 @@
   }
 
   // ===========================================================================
+  // 시간의 낫 (시계탑 뒤 — h_clock 완료 후에만 보이고 집을 수 있음)
+  // ===========================================================================
+  var SCYTHE_X = TOWER_X + TOWER_W - 10;   // 1812: 탑 오른쪽 받침대 발치
+  var SCYTHE_HOLD = 2;
+  function scytheVisible() { return mstate('h_clock').done && !mstate('h_scythe').done; }
+  function scytheUnder(p) {
+    if (!p || !p.alive || !p.onGround) return false;
+    if (Math.abs(p.x + p.w / 2 - SCYTHE_X) > 30) return false;
+    return Math.abs(p.y + p.h - groundY()) <= 4;
+  }
+  function updateScythe(dt, p) {
+    if (scythe.flash > 0) scythe.flash = Math.max(0, scythe.flash - dt * 1.2);
+    if (scythe.reveal > 0) scythe.reveal = Math.max(0, scythe.reveal - dt);
+    var held = downHeld();
+    if (!held) scythe.lock = false;
+    if (!scytheVisible() || !p || !held || scythe.lock || !scytheUnder(p)) { scythe.hold = 0; return; }
+    p.frozen = Math.max(p.frozen || 0, 0.12);   // 무릎 꿇는 자세
+    var prev = scythe.hold;
+    scythe.hold += dt;
+    var gy = groundY();
+    if (Math.floor(prev * 6) !== Math.floor(scythe.hold * 6)) particles(SCYTHE_X + 8, gy - 30, 3, '#ffd27a', 120);
+    if (scythe.hold >= SCYTHE_HOLD) {
+      scythe.hold = 0;
+      scythe.lock = true;
+      pickScythe();
+    }
+  }
+  function pickScythe() {
+    var gy = groundY();
+    scythe.flash = 1;
+    scythe.reveal = 2.5;
+    particles(SCYTHE_X + 10, gy - 40, 60, '#ffd27a', 620);
+    particles(SCYTHE_X + 10, gy - 40, 34, '#fff3c0', 420);
+    particles(SCYTHE_X + 10, gy - 40, 24, '#7ad0ff', 300);
+    particles(FACE_CX, clockGeom().cy, 20, '#ffd34a', 260);
+    clock.flash = 1;
+    if (typeof G.shake === 'function') { try { G.shake(12); } catch (e) { /* 무시 */ } }
+    toast('⌛ 전설의 무기 「시간의 낫」을 손에 넣었다!');
+    complete('h_scythe');
+  }
+  // 탑보다 먼저 그림 → 탑 몸체에 가려지고 칼날 끝만 오른쪽으로 삐져나옴
+  function drawScytheBehind(c, gy) {
+    if (!scytheVisible()) return;
+    var x = SCYTHE_X, base = gy - 24;   // 받침대 윗면에 기대어 섬
+    var pulse = 0.55 + 0.45 * Math.sin(animT * 2.4);
+    c.lineCap = 'round';
+    // 자루 (탑 뒤에 비스듬히 기댐)
+    c.strokeStyle = '#3a2a1a';
+    c.lineWidth = 4;
+    c.beginPath(); c.moveTo(x - 6, base + 22); c.lineTo(x + 14, base - 96); c.stroke();
+    // 칼날 (자루 끝에서 오른쪽 아래로 휘어짐)
+    var hx = x + 14, hy = base - 96;
+    c.beginPath();
+    c.moveTo(hx, hy);
+    c.quadraticCurveTo(hx + 44, hy - 14, hx + 58, hy + 26);
+    c.quadraticCurveTo(hx + 36, hy + 2, hx + 2, hy + 8);
+    c.closePath();
+    var bg = c.createLinearGradient(hx, hy - 10, hx + 58, hy + 26);
+    bg.addColorStop(0, '#8a6a2a');
+    bg.addColorStop(0.6, '#ffd27a');
+    bg.addColorStop(1, '#fff3c0');
+    c.fillStyle = bg;
+    c.globalAlpha = 0.55 + 0.35 * pulse;
+    c.fill();
+    c.globalAlpha = 1;
+    c.lineCap = 'butt';
+  }
+  // 탑 다음에 그림 → 받침대 발치의 금빛 반짝임 + 유지 게이지
+  function drawScytheFront(c, gy) {
+    var p = localPlayer();
+    var near = 0;
+    if (p) near = clamp(1 - Math.abs(p.x + p.w / 2 - SCYTHE_X) / 300, 0, 1);
+    var gx = SCYTHE_X + 6, gyy = gy - 12;
+    c.globalCompositeOperation = 'lighter';
+    if (mstate('h_scythe').done) {
+      // 빈 받침: 아주 옅은 잔광만
+      if (scythe.reveal > 0 || near > 0.6) {
+        var ra = Math.max(scythe.reveal / 2.5 * 0.8, (near - 0.6) * 0.2);
+        var rg = c.createRadialGradient(gx, gyy, 1, gx, gyy, 40);
+        rg.addColorStop(0, 'rgba(255,210,122,' + ra.toFixed(3) + ')');
+        rg.addColorStop(1, 'rgba(255,210,122,0)');
+        c.fillStyle = rg;
+        c.beginPath(); c.arc(gx, gyy, 40, 0, Math.PI * 2); c.fill();
+      }
+      c.globalCompositeOperation = 'source-over';
+      c.strokeStyle = 'rgba(30,20,12,0.6)';
+      c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(SCYTHE_X - 8, gy - 24); c.lineTo(SCYTHE_X + 4, gy - 24); c.stroke();
+      return;
+    }
+    if (!mstate('h_clock').done) {
+      // 아직 봉인: 아주 가끔 스치는 미세한 반짝임
+      var ph = (animT % 9) / 9;
+      if (ph > 0.94) {
+        var sa = Math.sin((ph - 0.94) / 0.06 * Math.PI) * 0.22;
+        c.fillStyle = 'rgba(255,230,160,' + sa.toFixed(3) + ')';
+        c.beginPath(); c.arc(gx, gyy, 2, 0, Math.PI * 2); c.fill();
+      }
+      c.globalCompositeOperation = 'source-over';
+      return;
+    }
+    var pulse = 0.5 + 0.5 * Math.sin(animT * 2.4);
+    var a = 0.18 + 0.2 * pulse + near * 0.25 + scythe.hold * 0.2;
+    var gg = c.createRadialGradient(gx, gyy, 1, gx, gyy, 30 + near * 12);
+    gg.addColorStop(0, 'rgba(255,220,130,' + clamp(a, 0, 1).toFixed(3) + ')');
+    gg.addColorStop(1, 'rgba(255,190,80,0)');
+    c.fillStyle = gg;
+    c.beginPath(); c.arc(gx, gyy, 30 + near * 12, 0, Math.PI * 2); c.fill();
+    // 반짝이는 십자 별
+    var tw = 4 + 3 * pulse;
+    c.strokeStyle = 'rgba(255,243,192,' + (0.5 + 0.4 * pulse).toFixed(3) + ')';
+    c.lineWidth = 1.2;
+    c.beginPath();
+    c.moveTo(gx - tw, gyy); c.lineTo(gx + tw, gyy);
+    c.moveTo(gx, gyy - tw); c.lineTo(gx, gyy + tw);
+    c.stroke();
+    // 떠오르는 금가루
+    c.fillStyle = 'rgba(255,230,160,0.8)';
+    for (var i = 0; i < 3; i++) {
+      var t = (animT * 0.5 + i / 3) % 1;
+      c.globalAlpha = (1 - t) * (0.4 + near * 0.6);
+      c.beginPath(); c.arc(gx + Math.sin(animT * 1.7 + i * 2) * 8, gyy - t * 40, 1.3, 0, Math.PI * 2); c.fill();
+    }
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+    // 유지 게이지
+    if (scythe.hold > 0) {
+      var ry = p ? p.y - 16 : gy - 84;
+      c.strokeStyle = 'rgba(0,0,0,0.5)';
+      c.lineWidth = 4;
+      c.beginPath(); c.arc(SCYTHE_X, ry, 10, 0, Math.PI * 2); c.stroke();
+      c.strokeStyle = '#ffd27a';
+      c.lineWidth = 3;
+      c.beginPath(); c.arc(SCYTHE_X, ry, 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(scythe.hold / SCYTHE_HOLD, 0, 1)); c.stroke();
+    }
+  }
+
+  // ===========================================================================
   // 이끼 뭉치
   // ===========================================================================
   function updateMoss(p) {
@@ -821,7 +997,18 @@
       simT += dt;
       var p = localPlayer();
       var alive = !!(p && p.alive);
+      // 떠도는 혼: KO 후 부활(죽음 → 삶) 순간에 5초 창 열기
+      if (alive && !ghostWin.wasAlive && ghostWin.pendingKO) {
+        ghostWin.pendingKO = false;
+        if (!mstate('h_ghost').done) {
+          ghostWin.until = simT + GHOST_WINDOW;
+          ghostWin.used = false;
+          particles(p.x + p.w / 2, p.y + p.h / 2, 16, '#b8c8ff', 220);
+        }
+      }
+      ghostWin.wasAlive = alive;
       updateClock(dt);
+      updateScythe(dt, alive ? p : null);
       if (alive) {
         runT.m_cool += dt;
         var sc = mstate('m_cool');
@@ -892,7 +1079,13 @@
     if (!mossItems.length && !G.running) buildMoss();
     if (TOWER_X + TOWER_W + 120 > vx0 && TOWER_X - 120 < vx1) {
       ctx.save();
+      try { drawScytheBehind(ctx, gy); } catch (e) { /* 무시 */ }
+      ctx.restore();
+      ctx.save();
       try { drawTower(ctx, gy); } catch (e) { /* 무시 */ }
+      ctx.restore();
+      ctx.save();
+      try { drawScytheFront(ctx, gy); } catch (e) { /* 무시 */ }
       ctx.restore();
     }
     for (var i = 0; i < stones.length; i++) {
@@ -1320,6 +1513,14 @@
     '#missions-panel .mp-ms .ok{font-size:12px;color:#ffd34a;font-weight:800;white-space:nowrap;}',
     '#missions-panel .mp-ms .ds{font-size:12px;color:#d0c2ac;margin-top:3px;}',
     '#missions-panel .mp-ms .hint{font-size:13px;color:#cdb8ff;margin-top:5px;font-style:italic;}',
+    '#missions-panel .mp-ms .riddle{position:relative;margin-top:8px;padding:10px 12px 10px 14px;border-radius:6px;border:1px solid rgba(160,120,220,.35);border-left:3px solid #8a6ad0;background:linear-gradient(180deg,rgba(236,220,186,.13),rgba(120,90,160,.12)),radial-gradient(circle at 90% 10%,rgba(205,184,255,.12),transparent 50%);color:#efe2c4;font:italic 500 13.5px/1.7 var(--font-body,"Noto Serif KR",serif);letter-spacing:.01em;text-shadow:0 1px 0 rgba(0,0,0,.4);word-break:keep-all;}',
+    '#missions-panel .mp-ms .riddle::before{content:"❝";position:absolute;right:8px;top:2px;font-size:22px;color:rgba(205,184,255,.35);font-style:normal;}',
+    '#missions-panel .mp-ms .rd-seal{margin-top:6px;font-size:12px;color:#b9a6e0;font-style:italic;}',
+    '#missions-panel .mp-ms .rd-ans{margin-top:7px;font-size:12px;}',
+    '#missions-panel .mp-ms .rd-ans summary{cursor:pointer;color:#cdb8ff;font-weight:700;user-select:none;list-style:none;display:inline-block;padding:2px 8px;border-radius:4px;border:1px dashed rgba(205,184,255,.4);background:rgba(40,28,60,.4);}',
+    '#missions-panel .mp-ms .rd-ans summary::-webkit-details-marker{display:none;}',
+    '#missions-panel .mp-ms .rd-ans[open] summary{margin-bottom:4px;}',
+    '#missions-panel .ab-rd{margin-top:3px;font-style:italic;color:#d8c8ff;}',
     '#missions-panel .mp-ms .bar{margin-top:8px;height:8px;border-radius:4px;background:rgba(0,0,0,.5);overflow:hidden;}',
     '#missions-panel .mp-ms .bar i{display:block;height:100%;background:linear-gradient(90deg,#4c6a28,#a8e060);}',
     '#missions-panel .mp-ms.done .bar i{background:linear-gradient(90deg,#c99a3a,#ffd34a);}',
@@ -1533,7 +1734,7 @@
     if (!k) return false;
     if (!Progress.isElementUnlocked(el)) {
       var md = ELEMENT_TO_MISSION[el];
-      panelMsg = { warn: true, text: '🔒 ' + k.elementName + ' 능력은 잠겨 있어요' + (md ? ' — ' + (md.hidden ? '히든 미션 「' + md.name + '」 클리어 시 해금 (히든 미션 탭에서 방법 확인)' : '미션 「' + md.name + '」 클리어 시 해금') : '') };
+      panelMsg = { warn: true, text: '🔒 ' + k.elementName + ' 능력은 잠겨 있어요' + (md ? ' — ' + (md.hidden ? '히든 미션 「' + md.name + '」: “' + riddleFirst(md) + '” (히든 미션 탭에서 수수께끼를 풀어 보세요)' : '미션 「' + md.name + '」 클리어 시 해금') : '') };
       return false;
     }
     var P = G.Powers, ok;
@@ -1604,9 +1805,9 @@
       if (md) {
         var st = mstate(md.id), goal = goalOf(md), v = Math.min(goal, st.progress || 0);
         if (md.hidden) {
-          h += '<div class="ab-lk"><b>히든 미션: ' + esc(md.name) + '</b> — ' + esc(md.desc) +
+          h += '<div class="ab-lk"><b>🔮 히든 미션: ' + esc(md.name) + '</b><div class="ab-rd">“' + esc(riddleFirst(md)) + '”</div>' +
             '<div class="ab-bar"><i style="width:' + Math.round(v / goal * 100) + '%"></i></div>' +
-            '<div class="ab-pv">' + v + '/' + goal + '</div></div>';
+            '<div class="ab-pv">' + hiddenProgText(md, v, goal) + '</div></div>';
         } else {
           h += '<div class="ab-lk"><b>미션: ' + esc(md.name) + '</b> — ' + esc(md.desc) +
             '<div class="ab-bar"><i style="width:' + Math.round(v / goal * 100) + '%"></i></div>' +
@@ -1630,7 +1831,44 @@
     return h + '</div>';
   }
 
+  // 수수께끼 (줄 목록 / 첫 줄)
+  function riddleLines(def) {
+    var r = def && (def.riddle || def.hint);
+    return r ? String(r).split('\n') : [];
+  }
+  function riddleFirst(def) {
+    var l = riddleLines(def);
+    return l.length ? l[0] : (def ? def.name : '');
+  }
+  // 히든 미션 진행 표시: 시작 전에는 목표를 숨김
+  function hiddenProgText(def, v, goal) {
+    if (mstate(def.id).done) return goal + '/' + goal;
+    return v > 0 ? v + '/' + goal : '?/???';
+  }
+
+  function hiddenCard(def) {
+    var st = mstate(def.id);
+    var goal = goalOf(def);
+    var inf = rewardInfo(def);
+    var v = Math.min(goal, st.progress || 0);
+    var pct = st.done ? 100 : Math.round(v / goal * 100);
+    var lines = riddleLines(def), rd = '';
+    for (var i = 0; i < lines.length; i++) rd += (i ? '<br>' : '') + esc(lines[i]);
+    var exact = '<div class="ds"><b>조건:</b> ' + esc(def.desc) + '</div>' +
+      (def.how ? '<div class="ds"><b>방법:</b> ' + esc(def.how) + '</div>' : '');
+    var locked = def.id === 'h_scythe' && !mstate('h_clock').done && !st.done;
+    return '<div class="mp-ms hid' + (st.done ? ' done' : '') + '">' +
+      '<div class="t"><span class="nm">🔮 ' + esc(def.name) + '</span>' + (st.done ? '<span class="ok">✔ 완료</span>' : '') + '</div>' +
+      (rd ? '<div class="riddle">' + rd + '</div>' : '') +
+      (locked ? '<div class="rd-seal">⏳ 무언가가 아직 잠들어 있다… 다른 수수께끼가 먼저 풀려야 할 것 같다.</div>' : '') +
+      (st.done ? exact : '<details class="rd-ans"><summary>💡 정답 보기</summary>' + exact + '</details>') +
+      '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="ft"><span class="rw">보상: ' + esc(inf.label) + ' 능력</span>' +
+      '<span>' + hiddenProgText(def, v, goal) + '</span></div></div>';
+  }
+
   function msCard(def, hiddenView) {
+    if (hiddenView) return hiddenCard(def);
     var st = mstate(def.id);
     var goal = goalOf(def);
     var inf = rewardInfo(def);
@@ -1648,9 +1886,10 @@
   }
 
   function hiddenCount() { var n = 0; for (var i = 0; i < DEFS.length; i++) if (DEFS[i].hidden) n++; return n; }
+  function hiddenDone() { var n = 0; for (var i = 0; i < DEFS.length; i++) if (DEFS[i].hidden && mstate(DEFS[i].id).done) n++; return n; }
   function renderMissions(hidden) {
     var h = '<p class="mp-note">' + (hidden
-      ? '히든 미션 ' + hiddenCount() + '개의 정확한 조건과 방법입니다. 클리어하면 강력한 능력을 얻습니다. (보스가 나와 있는 동안에는 발판이 봉쇄되니, 발판이 필요한 미션은 보스가 없을 때 하세요.)'
+      ? '🔮 수수께끼를 풀어 숨겨진 능력을 깨우세요. 히든 미션 ' + hiddenCount() + '개 (완료 ' + hiddenDone() + '개) — 도저히 모르겠다면 「💡 정답 보기」를 열어 보세요. (보스가 나와 있는 동안에는 발판이 봉쇄되니, 발판이 필요한 미션은 보스가 없을 때 하세요.)'
       : '미션은 혼자 연습과 온라인 대전 모두에서 진행됩니다. 클리어하면 새 능력을 얻어요.') + '</p><div class="mp-list">';
     for (var i = 0; i < DEFS.length; i++) {
       if (!!DEFS[i].hidden !== hidden) continue;

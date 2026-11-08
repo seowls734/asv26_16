@@ -32,7 +32,7 @@
   function alive(e) { return !!e && e.alive !== false; }
   function center(e) { return { x: e.x + (e.w || 0) / 2, y: e.y + (e.h || 0) / 2 }; }
   function findMutant(id) {
-    var l = (G.Mutants && G.Mutants.list) || [];
+    var l = ((G.Mutants && G.Mutants.list) || []).filter(function (q) { return !(q && q.under); });
     for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i];
     return null;
   }
@@ -237,7 +237,7 @@
         var d = Math.sqrt(dx * dx + dy * dy);
         if (d <= PG_RANGE && d < bd) { bd = d; best = { kind: kind, id: id, ry: S.rel(c.y) }; }
       }
-      var l = (G.Mutants && G.Mutants.list) || [];
+      var l = ((G.Mutants && G.Mutants.list) || []).filter(function (q) { return !(q && q.under); });
       for (var i = 0; i < l.length; i++) consider('mutant', l[i].id, l[i]);
       var others = typeof S.remotePlayers === 'function' ? S.remotePlayers() : [];
       for (var j = 0; j < others.length; j++) if (others[j] && others[j].id != null) consider('player', others[j].id, others[j]);
@@ -460,7 +460,7 @@
   });
 
   // ================================================================ 3. 시간 정지
-  var TS_LIFE = 3, TS_MUT = 3, TS_PLAYER = 2.5, TS_COL = '#6fd8ff', TS_R = 99999;
+  var TS_LIFE = 5, TS_MUT = 5, TS_PLAYER = 4.5, TS_COL = '#6fd8ff', TS_R = 99999;
   var ROMAN = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
 
   function tsAlpha(t) {
@@ -612,7 +612,7 @@
   S.register({
     id: 'timestop', element: 'time', elementName: '시간', name: '시간 정지', icon: '⏳',
     rarity: 'hard', cost: 80, cooldown: 20, color: TS_COL,
-    desc: '3초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다.',
+    desc: '5초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다. 멈춘 동안 내 기술은 쿨타임과 에너지 소모가 없습니다.',
     cast: function (ctx) {
       var p = ctx.p;
       var cx = p ? ctx.x + p.w / 2 : ctx.x, cy = p ? ctx.y + p.h / 2 : ctx.y;

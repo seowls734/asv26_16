@@ -88,7 +88,7 @@
     }
     return best || bestDead;
   }
-  function mutantList() { return (G.Mutants && G.Mutants.list) || []; }
+  function mutantList() { return ((G.Mutants && G.Mutants.list) || []).filter(function (q) { return !(q && q.under); }); }
   function alive(e) { return !!e && e.alive !== false; }
   function shake(a) { if (typeof G.shake === 'function') { G.shake(a); } }
   function send(msg) { if (G.Net && typeof G.Net.send === 'function') { G.Net.send(msg); } }
@@ -1317,12 +1317,26 @@
     finally { curTag = prev; }
   }
 
+  // 시간 정지 중 무한 시전: 시전자 본인의 시간 정지가 흐르는 동안 기술은 쿨타임·에너지 소모 없음
+  // (시간 정지 자체는 제외 — 무한 연장 방지)
+  function timeStopFree(casterId, id) {
+    if (casterId == null || id === 'timestop') { return false; }
+    var list = S.fx;
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i];
+      if (!f || f.dead || f.skill !== 'timestop' || !(f.t < f.life)) { continue; }
+      if (f.casterId != null && String(f.casterId) === String(casterId)) { return true; }
+    }
+    return false;
+  }
+
   // 봇이 지금 이 기술을 쓸 수 있는가
   function botCanCast(bot, id) {
     var def = getDef(id);
     if (!def || typeof def.cast !== 'function' || !bot || !alive(bot)) { return false; }
     var bcd = bot._cd || {};
-    if ((bcd[id] || 0) > 0 || (bot.energy || 0) < def.cost) { return false; }
+    var bfree = timeStopFree(bot.id, id);
+    if (!bfree && ((bcd[id] || 0) > 0 || (bot.energy || 0) < def.cost)) { return false; }
     if (bot._dash || (bot._castLock || 0) > 0 || (bot.frozen || 0) > 0) { return false; }
     return true;
   }
@@ -1354,8 +1368,8 @@
     }
     if (!ok) { return false; }
     if (!bot._cd) { bot._cd = {}; }
-    bot.energy -= def.cost;
-    bot._cd[id] = def.cooldown;
+    if (timeStopFree(bot.id, id)) { bot._cd[id] = 0; }
+    else { bot.energy -= def.cost; bot._cd[id] = def.cooldown; }
     bot.castTimer = CAST_TIME;
     bot.facing = lctx.facing = facing;
     var bx = bot.x, by = bot.y;
@@ -1456,6 +1470,8 @@
       'color:#fff;text-shadow:0 0 4px #000,0 0 6px rgba(var(--pc),.8);z-index:4;pointer-events:none;}',
       '.pw-slot.pw-empty{opacity:.35;filter:grayscale(1);}',
       '.pw-slot.pw-low{opacity:.45;filter:grayscale(.7);}',
+      '.pw-slot.pw-free{border-color:#7ad0ff !important;box-shadow:0 0 18px rgba(122,208,255,.9),inset 0 0 14px rgba(122,208,255,.5) !important;animation:pwFree .5s ease-in-out infinite alternate;}',
+      '@keyframes pwFree{from{filter:brightness(1)}to{filter:brightness(1.35)}}',
       '.pw-slot.pw-ready{border-color:rgb(var(--pc));box-shadow:0 4px 12px rgba(0,0,0,.45),0 0 16px rgba(var(--pc),.75),inset 0 0 14px rgba(var(--pc),.4);}',
       '.pw-slot.pw-fire{animation:pw-fire .25s ease-out;}',
       '.pw-slot.pw-deny{animation:pw-shake .35s ease;border-color:#ff2a2a!important;box-shadow:0 0 14px rgba(255,30,30,.9)!important;}',
@@ -1535,16 +1551,19 @@
   function updateSlots() {
     var p = localP();
     var energy = p ? p.energy : 0;
+    var meId = p ? myId() : null;
     for (var i = 0; i < slotEls.length; i++) {
       var s = slotEls[i];
       var d = getDef(s.id);
       if (!d || !s.cd || !s.num || !s.root.classList) { continue; }
-      var left = cd[s.id] || 0;
+      var free = !!p && timeStopFree(meId, s.id);
+      if (free !== s.lastFree) { s.root.classList.toggle('pw-free', free); s.lastFree = free; }
+      var left = free ? 0 : (cd[s.id] || 0);
       var pct = left > 0 && d.cooldown > 0 ? Math.round(clamp(left / d.cooldown, 0, 1) * 1000) / 10 : 0;
       if (pct !== s.lastPct) { s.cd.style.height = pct + '%'; s.lastPct = pct; }
       var n = left > 0 ? (left >= 1 ? String(Math.ceil(left)) : left.toFixed(1)) : '';
       if (n !== s.lastNum) { s.num.textContent = n; s.lastNum = n; }
-      var low = energy < d.cost;
+      var low = !free && energy < d.cost;
       if (low !== s.lastLow) { s.root.classList.toggle('pw-low', low); s.lastLow = low; }
       var ready = !low && left <= 0;
       if (ready !== s.lastReady) { s.root.classList.toggle('pw-ready', ready); s.lastReady = ready; }
@@ -1680,7 +1699,8 @@
       var id = P.slots[idx];
       var def = getDef(id);
       if (!def || typeof def.cast !== 'function') { return; }
-      if ((cd[id] || 0) > 0 || (p.energy || 0) < def.cost || p._dash || castLock > 0 || (p.frozen || 0) > 0) {
+      var free = timeStopFree(myId(), id);
+      if ((!free && ((cd[id] || 0) > 0 || (p.energy || 0) < def.cost)) || p._dash || castLock > 0 || (p.frozen || 0) > 0) {
         flashSlot(idx, 'pw-deny'); return;
       }
       var castId = 'c' + (++castCounter);
@@ -1695,8 +1715,8 @@
         if (r && typeof r === 'object') { data = r; }
       }
       ctx.data = data;
-      p.energy -= def.cost;
-      cd[id] = def.cooldown;
+      if (free) { cd[id] = 0; }
+      else { p.energy -= def.cost; cd[id] = def.cooldown; }
       p.castTimer = CAST_TIME;
       send({ t: 'cast', skill: id, castId: castId, x: p.x, gy: rel(p.y), facing: ctx.facing, data: data });
       try { def.cast(ctx); } catch (e2) { logErr('cast ' + id, e2); }
@@ -1758,6 +1778,7 @@
     }
   };
 
+  S.timeStopFree = timeStopFree;     // (casterId, skillId) → 시전자 본인의 시간 정지 중인가
   G.Skills = S;
   G.Powers = P;
   bindNet(); // 로드 시 한 번 등록 (Net 이 아직 없으면 init/update 에서 재시도, 한 번만)

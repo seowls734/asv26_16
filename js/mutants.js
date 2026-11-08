@@ -19,7 +19,9 @@
     // 보스 '강철 지네' — 판정은 머리+앞 몸통, 뒤따르는 마디는 접촉 피해만
     centipede: { w: 180, h: 92, speed: 170, hp: 850, dmg: 8, knockX: 480, knockY: -300, flying: false, boss: true },
     // 강철 지네가 격노 시 떼어 내는 마디 드론 (지면 몬스터)
-    drone: { w: 38, h: 26, speed: 330, hp: 26, dmg: 7, knockX: 300, knockY: -220, flying: false }
+    drone: { w: 38, h: 26, speed: 330, hp: 26, dmg: 7, knockX: 300, knockY: -220, flying: false },
+    // 변이 두더지 — 땅속을 파고 다가와 발밑에서 솟구침 (땅속에선 무적)
+    mole: { w: 56, h: 38, speed: 260, hp: 45, dmg: 13, knockX: 420, knockY: -640, flying: false }
   };
   var BOSS_ORDER = ['behemoth', 'mossqueen', 'centipede'];
   var BOSS_NAMES = { behemoth: '녹슨 거수', mossqueen: '이끼 여왕', centipede: '강철 지네' };
@@ -54,6 +56,19 @@
     gustWind: 0.85, darts: 7, dartDmg: 9, dartSpd: 980, gustRange: 620, gustKx: 980, gustDmg: 6,
     enrageTime: 1.3, introT: 2.2
   };
+  // ---------------------------------------------------------------- 변이 두더지 수치
+  var MOLE = {
+    depth: 70,          // 땅속에 있을 때 몸통 윗면 = 땅 + depth (판정이 지면 기술에 닿지 않게)
+    near: 40,           // |dx| 가 이보다 가까우면 솟구칠 준비
+    windup: 0.6,        // 예고 (갈라짐 + 자갈)
+    erupt: 0.35, eruptVy: -760,
+    recover: 1.6,       // 솟구친 뒤 지상에 머무는 시간 (공격 가능)
+    burrow: 0.45,       // 다시 파고드는 연출
+    cd: 1.4,            // 다시 파고든 뒤 다음 솟구침까지 최소 간격
+    bite: 0.22, biteVx: 320, biteMul: 0.6
+  };
+  // ---------------------------------------------------------------- 스테이지 (보스 처치마다 +1)
+  var STAGE = { hpStep: 0.3, dmgStep: 0.15, bossHpStep: 0.25, spawnStep: 0.08, spawnMin: 0.6 };
   // 보스전 모드
   var RUSH = { first: 5, gap: 8, hpStep: 0.3 };
 
@@ -109,6 +124,8 @@
   // 발판 봉쇄
   var lockedPrev = false, lockAnim = 0, lockSince = 0;
   var toastQ = [], lastToastAt = -10;
+  var stage = 1;
+  var stageHudState = { shown: false, n: -1, pulse: false, boss: null };
 
   function net() { return Game.Net || null; }
 
@@ -170,6 +187,27 @@
   // 경기 진행도 0..1 (약 3분에 최대 난이도)
   function difficulty() { return clamp(matchTime / 180, 0, 1); }
 
+  // 스테이지 배율
+  function stageHpMul() { return 1 + STAGE.hpStep * (stage - 1); }
+  function stageDmgMul() { return 1 + STAGE.dmgStep * (stage - 1); }
+  function stageBossHpMul() { return 1 + STAGE.bossHpStep * (stage - 1); }
+  function stageSpawnMul() { return Math.max(STAGE.spawnMin, 1 - STAGE.spawnStep * (stage - 1)); }
+
+  // 스테이지 변경 (모든 클라이언트). announce: 알림 토스트
+  function setStage(n, announce) {
+    n = Math.max(1, Math.floor(+n || 1));
+    var changed = n !== stage;
+    stage = n;
+    Mutants.stage = stage;
+    if (announce) queueToast('🏆 스테이지 ' + stage + ' 돌입!');
+    if (changed) {
+      stageHudState.pulse = true;
+      if (Game.events && Game.events.emit) {
+        try { Game.events.emit('stageChanged', { stage: stage }); } catch (e) { /* 무시 */ }
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- 생성
   function makeMutant(type, id, x, y) {
     var T = TYPES[type] || TYPES.rat;
@@ -219,10 +257,12 @@
   function pickType() {
     var t = difficulty();
     var wr = 0.6 - 0.35 * t, wd = 0.25 + 0.2 * t, wc = 0.15 + 0.15 * t;
-    var r = Math.random() * (wr + wd + wc);
+    var wm = Math.min(0.32, 0.08 + 0.14 * t + 0.03 * (stage - 1));   // 두더지: 적게 시작해서 점점 자주
+    var r = Math.random() * (wr + wd + wc + wm);
     if (r < wr) return 'rat';
     if (r < wr + wd) return 'dog';
-    return 'crow';
+    if (r < wr + wd + wc) return 'crow';
+    return 'mole';
   }
 
   function aliveCount() {
@@ -239,6 +279,9 @@
     if (T.flying) {
       x = rand(200, W.width - 200 - T.w);
       y = W.groundY - rand(420, 560);
+    } else if (type === 'mole') {
+      x = side < 0 ? rand(10, 60) : W.width - T.w - rand(10, 60);
+      y = W.groundY + MOLE.depth;       // 땅속에서 등장
     } else {
       x = side < 0 ? rand(10, 60) : W.width - T.w - rand(10, 60);
       y = W.groundY - T.h - rand(0, 160); // 살짝 위에서 떨어지며 등장
@@ -246,9 +289,14 @@
     var m = makeMutant(type, nextId++, x, y);
     m.facing = side < 0 ? 1 : -1;
     m.wanderDir = m.facing;
+    // 스테이지 배율 (일반 돌연변이)
+    m.hp = m.maxHp = Math.round(T.hp * stageHpMul());
+    m.dmgMul = stageDmgMul();
+    if (type === 'mole') { m.under = true; setState(m, 'under', 0); m.attackCd = rand(0.4, 0.9); }
     Mutants.list.push(m);
-    particles(x + T.w / 2, y + T.h / 2, 18, TOXIC, 220);
-    send({ t: 'mutantFx', kind: 'spawn', id: m.id, x: Math.round(x + T.w / 2), y: Math.round(y + T.h / 2), gy: world().groundY });
+    var fy = type === 'mole' ? W.groundY - 6 : y + T.h / 2;
+    particles(x + T.w / 2, fy, 18, type === 'mole' ? '#9a8460' : TOXIC, 220);
+    send({ t: 'mutantFx', kind: 'spawn', id: m.id, x: Math.round(x + T.w / 2), y: Math.round(fy), gy: world().groundY });
     return m;
   }
 
@@ -421,6 +469,179 @@
     groundPhysics(m, dt);
   }
 
+  // ---------------------------------------------------------------- AI: 변이 두더지 (권한측)
+  // under(땅속 이동, 무적) → windup(갈라짐 예고, 무적) → attack(솟구침) → recover(지상, 공격 가능, 근접 시 한 번 깨묾)
+  // → burrow(파고듦) → under. 발판 무시, 땅만 다님.
+  function moleGround(m, dt) {
+    var W = world();
+    m.vy += gravity() * dt;
+    if (m.vy > 1600) m.vy = 1600;
+    m.x += m.vx * dt;
+    m.y += m.vy * dt;
+    m.onGround = false;
+    if (m.y + m.h >= W.groundY) { m.y = W.groundY - m.h; m.vy = 0; m.onGround = true; }
+    if (m.x < 0) { m.x = 0; m.vx = 0; m.wanderDir = 1; }
+    if (m.x + m.w > W.width) { m.x = W.width - m.w; m.vx = 0; m.wanderDir = -1; }
+  }
+
+  function moleSurface(m, vy) {
+    m.under = false;
+    m.y = world().groundY - m.h;
+    m.vy = vy || 0;
+    m.onGround = !vy;
+  }
+
+  function updateMole(m, dt) {
+    var W = world();
+    var G0 = W.groundY;
+    var diff = difficulty();
+    var spd = TYPES.mole.speed * (1 + 0.2 * diff);
+    var tgt = nearestTarget(m);
+    m.target = tgt;
+    m.attackCd -= dt;
+    var cx = m.x + m.w / 2;
+    var dxT = 0, dyT = 0;
+    if (tgt) {
+      dxT = (tgt.x + tgt.w / 2) - cx;
+      dyT = (tgt.y + tgt.h) - (m.y + m.h);
+    }
+
+    switch (m.state) {
+      case 'under':
+        m.under = true;
+        m.vy = 0;
+        m.y = G0 + MOLE.depth;
+        if (!tgt) {
+          m.wanderTimer -= dt;
+          if (m.wanderTimer <= 0) { m.wanderDir = -m.wanderDir; m.wanderTimer = rand(1.5, 3.5); }
+          m.vx = approach(m.vx, m.wanderDir * spd * 0.35, 1200, dt);
+          m.facing = m.wanderDir;
+        } else {
+          m.facing = dxT >= 0 ? 1 : -1;
+          var desired = Math.abs(dxT) > 6 ? m.facing * Math.min(spd, Math.abs(dxT) * 8) : 0;
+          m.vx = approach(m.vx, desired, 1800, dt);
+          if (Math.abs(dxT) < MOLE.near && m.attackCd <= 0) {
+            m.vx = 0;
+            setState(m, 'windup', MOLE.windup * (1 - 0.25 * diff));
+          }
+        }
+        m.x += m.vx * dt;
+        if (m.x < 0) { m.x = 0; m.vx = 0; m.wanderDir = 1; }
+        if (m.x + m.w > W.width) { m.x = W.width - m.w; m.vx = 0; m.wanderDir = -1; }
+        return;
+
+      case 'windup':
+        // 제자리에서 땅이 갈라짐 — 이 자리를 피하면 됨
+        m.under = true;
+        m.vx = 0; m.vy = 0;
+        m.y = G0 + MOLE.depth;
+        if (tgt && Math.abs(dxT) > 4) m.facing = dxT >= 0 ? 1 : -1;
+        m.stateTimer -= dt;
+        if (m.stateTimer <= 0) {
+          moleSurface(m, MOLE.eruptVy * (1 + 0.1 * diff));
+          m.vx = m.facing * 40;
+          setState(m, 'attack', MOLE.erupt);
+        }
+        return;
+
+      case 'attack':
+        m.stateTimer -= dt;
+        if (m.stateTimer <= 0) {
+          m.bit = false;
+          setState(m, 'recover', MOLE.recover * (1 - 0.3 * diff));
+          m.stateDur = m.stateTimer;
+        }
+        break;
+
+      case 'recover':
+        m.vx = approach(m.vx, 0, 1400, dt);
+        if (tgt && m.onGround) m.facing = dxT >= 0 ? 1 : -1;
+        m.stateTimer -= dt;
+        // 착지 후 붙어 있으면 한 번 깨묾
+        if (!m.bit && m.onGround && tgt && (m.stateDur - m.stateTimer) > 0.35 && Math.abs(dxT) < m.w * 0.5 + 34 && Math.abs(dyT) < 50) {
+          m.bit = true;
+          m.resumeT = m.stateTimer;
+          setState(m, 'bite', MOLE.bite);
+          m.vx = m.facing * MOLE.biteVx;
+          break;
+        }
+        if (m.stateTimer <= 0) setState(m, 'burrow', MOLE.burrow);
+        break;
+
+      case 'bite':
+        m.vx = approach(m.vx, 0, 1600, dt);
+        m.stateTimer -= dt;
+        if (m.stateTimer <= 0) setState(m, 'recover', Math.max(0.35, (m.resumeT || 0) - MOLE.bite));
+        break;
+
+      case 'burrow':
+        m.vx = approach(m.vx, 0, 2000, dt);
+        m.stateTimer -= dt;
+        // 판정은 지상에 둔 채 그림만 가라앉음 (render 에서 땅 아래 잘라냄)
+        m.sink = clamp(1 - m.stateTimer / MOLE.burrow, 0, 1);
+        if (m.stateTimer <= 0) {
+          m.sink = 0;
+          m.under = true;
+          m.y = G0 + MOLE.depth; m.vy = 0;
+          m.attackCd = MOLE.cd * (1 - 0.4 * diff) + rand(0, 0.5);
+          setState(m, 'under', 0);
+          return;
+        }
+        break;
+
+      case 'hurt':
+        m.vx = approach(m.vx, 0, 900, dt);
+        m.stateTimer -= dt;
+        if (m.stateTimer <= 0) { m.bit = true; setState(m, 'recover', 0.5); m.stateDur = 0.5; }
+        break;
+
+      default:
+        if (m.under) setState(m, 'under', 0);
+        else { setState(m, 'recover', 0.5); m.stateDur = 0.5; }
+    }
+    moleGround(m, dt);
+  }
+
+  // 모든 클라이언트: 흙먼지/자갈/분출 연출 + 땅속 이동 흔적 (동기화된 state 기준)
+  function moleFx(m, dt) {
+    var G0 = gy(), cx = m.x + m.w / 2;
+    var ps = m.prevState;
+    if (ps !== m.state) {
+      m.prevState = m.state;
+      if (m.state === 'windup') {
+        particles(cx, G0 - 4, 8, '#8a7a5a', 120);
+      } else if (m.state === 'attack' && (ps === 'windup' || ps === 'under')) {
+        particles(cx, G0 - 6, 26, '#9a8460', 380);
+        particles(cx, G0 - 8, 10, '#5a4a3a', 300);
+        particles(cx, G0 - 10, 10, TOXIC, 260);
+        bossFx.push({ kind: 'crack', x: cx, w: 110, life: 1.3, t: 0 });
+        shake(5);
+      } else if (m.state === 'burrow') {
+        particles(cx, G0 - 4, 14, '#9a8460', 220);
+      } else if (m.state === 'under' && ps === 'burrow') {
+        particles(cx, G0 - 4, 8, '#7a6a4a', 140);
+      } else if (m.state === 'hurt' && (ps === 'under' || ps === 'windup')) {
+        // 기절로 튀어나옴
+        particles(cx, G0 - 6, 18, '#9a8460', 300);
+        particles(cx, G0 - 10, 6, TOXIC, 200);
+      }
+    }
+    var under = m.under || m.state === 'under' || m.state === 'windup';
+    if (!m.trail) m.trail = [];
+    if (under && m.state === 'under') {
+      m.trailT = (m.trailT || 0) - dt;
+      if (m.trailT <= 0 && Math.abs(m.vx) > 30) {
+        m.trailT = 0.07;
+        m.trail.push({ x: cx, t: clock });
+        particles(cx - m.facing * 12, G0 - 3, 1, '#8a7a5a', 80);
+      }
+    } else if (m.state === 'windup') {
+      m.dustT = (m.dustT || 0) - dt;
+      if (m.dustT <= 0) { m.dustT = 0.05; particles(cx + rand(-22, 22), G0 - 3, 1, '#a89470', 150); }
+    }
+    while (m.trail.length && (clock - m.trail[0].t > 0.9 || m.trail.length > 24)) m.trail.shift();
+  }
+
   // ---------------------------------------------------------------- AI: 까마귀
   function updateCrow(m, dt) {
     var W = world();
@@ -551,6 +772,9 @@
       m.hp = s.hp; m.maxHp = s.maxHp || m.maxHp;
       m.state = s.state || 'idle';
       m.stateTimer = s.stateTimer || 0;
+      m.under = !!s.u;
+      if (s.dm) m.dmgMul = +s.dm;
+      if (m.type === 'mole') m.sink = m.state === 'burrow' ? clamp(1 - m.stateTimer / MOLE.burrow, 0, 1) : 0;
       if (m.boss) {
         if (!m.enraged && s.enr) m.lagHp = m.hp;
         m.enraged = !!s.enr;
@@ -563,6 +787,7 @@
       next.push(m);
     }
     Mutants.list = next;
+    if (typeof msg.st === 'number' && msg.st >= 1 && msg.st !== stage) setStage(msg.st, false);   // 늦게 들어온 게스트 동기화
   }
 
   function onMutantHit(msg) {
@@ -601,6 +826,7 @@
   // 권한측 피해 적용. by: 'me'(이 클라이언트의 공격) | 게스트 net id(게스트가 보낸 mutantHit)
   function applyHit(m, dmg, kx, ky, src, by) {
     if (m.boss) { bossApplyHit(m, dmg, kx, ky, src, by); return; }
+    if (m.under) return;                      // 땅속 두더지는 무적
     var cx = m.x + m.w / 2, cy = m.y + m.h / 2;
     m.hitFlash = 0.15;
     m.hp -= dmg;
@@ -637,8 +863,22 @@
       else bossPhysics(m, dt);
       return true;
     }
+    if (m.type === 'mole' && m.under) {
+      if (m.stunT > 0) {
+        // 땅속에서 기절 → 지상으로 튀어나와 공격 가능
+        moleSurface(m, -320);
+        m.vx = 0;
+        setState(m, 'hurt', 0.1);
+      } else {
+        m.vx = 0;               // 속박: 땅속에서 멈춤
+        return true;
+      }
+    }
     if (m.stunT > 0 && m.state !== 'hurt') setState(m, 'hurt', 0.1);
-    if (m.type === 'crow') {
+    if (m.type === 'mole') {
+      m.vx *= Math.exp(-12 * dt);
+      moleGround(m, dt);
+    } else if (m.type === 'crow') {
       m.vx *= Math.exp(-10 * dt); m.vy *= Math.exp(-10 * dt);
       m.x += m.vx * dt; m.y += m.vy * dt;
     } else {
@@ -678,6 +918,8 @@
         facing: m.facing, hp: Math.round(m.hp * 10) / 10, maxHp: m.maxHp,
         state: m.state, stateTimer: Math.round(m.stateTimer * 100) / 100
       };
+      if (m.under) s.u = 1;
+      if (m.dmgMul && m.dmgMul !== 1) s.dm = Math.round(m.dmgMul * 100) / 100;
       if (m.boss) {
         s.enr = m.enraged ? 1 : 0;
         s.sd = Math.round(m.stateDur * 100) / 100;
@@ -686,12 +928,13 @@
       }
       out.push(s);
     }
-    send({ t: 'mutants', list: out, gy: world().groundY });
+    send({ t: 'mutants', list: out, gy: world().groundY, st: stage });
   }
 
   // ---------------------------------------------------------------- 공격 판정 (모든 클라이언트)
   function checkAttack(m) {
-    if (m.state !== 'attack' || m.dmgCd > 0) return;
+    var biting = m.state === 'bite' && m.type === 'mole';
+    if ((m.state !== 'attack' && !biting) || m.dmgCd > 0 || m.under) return;
     var P = Game.players || {};
     var me = P.local;
     if (!me || !me.alive) return;
@@ -699,8 +942,12 @@
     if (!rectHit(m, me)) return;
     var T = TYPES[m.type];
     var dir = (me.x + me.w / 2) >= (m.x + m.w / 2) ? 1 : -1;
+    var mul = m.dmgMul || stageDmgMul();
     m.dmgCd = DMG_INTERVAL;
-    if (typeof Game.damagePlayer === 'function') Game.damagePlayer(T.dmg, dir * T.knockX, T.knockY);
+    if (typeof Game.damagePlayer === 'function') {
+      if (biting) Game.damagePlayer(Math.round(T.dmg * MOLE.biteMul * mul), dir * T.knockX * 0.5, -260);
+      else Game.damagePlayer(Math.round(T.dmg * mul), dir * T.knockX, T.knockY);
+    }
     particles(me.x + me.w / 2, me.y + me.h / 2, 6, TOXIC, 160);
   }
 
@@ -916,6 +1163,8 @@
       if (typeof msg.count === 'number') bossesKilled = msg.count; else if (!local) bossesKilled++;
       Mutants.bossesKilled = bossesKilled;
       if (Game.events && Game.events.emit) Game.events.emit('bossDefeated', { type: dtp, count: bossesKilled, killer: msg.killer != null ? msg.killer : null });
+      // 스테이지 +1 (모든 클라이언트; 권한측은 bossDie → bossEmit 로 여기 도달)
+      setStage(typeof msg.count === 'number' ? msg.count + 1 : stage + 1, true);
     }
   }
 
@@ -964,7 +1213,8 @@
     var hp = BOSS.hpBase + BOSS.hpPer * combatants();
     if (type === 'mossqueen') hp *= QUEEN.hpMul;
     if (type === 'centipede') hp *= CENTI.hpMul;
-    if (bossMode) hp *= 1 + RUSH.hpStep * bossesKilled;
+    // 스테이지 배율 (보스전 모드도 이것만 — 예전 RUSH.hpStep × 처치 수 와 중복되지 않게 대체)
+    hp *= stageBossHpMul();
     return Math.round(hp / 10) * 10;
   }
 
@@ -1940,6 +2190,71 @@
     }
   }
 
+  // ---------------------------------------------------------------- 스테이지 배지 (모든 클라이언트)
+  // 위쪽 가운데. 보스 체력바(#boss-hud)가 보이면 그 아래로 내려감 (좁은 화면에선 보스바가 아래쪽이라 그대로)
+  var stageEl = null, stageNumEl = null;
+
+  function ensureStageHud() {
+    if (stageEl) return true;
+    if (typeof document === 'undefined' || !document.getElementById) return false;
+    var hud = document.getElementById('hud');
+    if (!hud) return false;
+    if (!document.getElementById('stage-hud-style')) {
+      var st = document.createElement('style');
+      st.id = 'stage-hud-style';
+      st.textContent = [
+        '#stage-hud{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:3;pointer-events:none;display:flex;align-items:baseline;gap:6px;padding:3px 12px 4px;border-radius:4px;' +
+          'background:repeating-linear-gradient(115deg,rgba(255,255,255,.04) 0 6px,rgba(0,0,0,0) 6px 14px),linear-gradient(180deg,rgba(46,52,51,.88),rgba(26,31,30,.88));' +
+          'border:2px solid #b5541c;box-shadow:inset 0 0 10px rgba(90,42,16,.6),0 0 0 1px #2e3433,0 0 12px rgba(141,255,60,.18),0 4px 10px rgba(0,0,0,.45);' +
+          'font-family:var(--font-title,sans-serif);white-space:nowrap;transition:top .25s ease}',
+        '#stage-hud[hidden]{display:none}',
+        '#stage-hud .sg-k{font-family:var(--font-body,sans-serif);font-size:.66rem;font-weight:900;letter-spacing:.22em;color:#e07a35;text-shadow:0 1px 0 #3a1408}',
+        '#stage-hud .sg-n{font-size:1.15rem;letter-spacing:.06em;color:#c8ff7a;text-shadow:0 0 8px rgba(141,255,60,.75),0 2px 0 #1a2a0a}',
+        '#stage-hud.bossup{top:64px}',
+        '#stage-hud.pulse{animation:sgPulse .9s ease-out 1}',
+        '@keyframes sgPulse{0%{transform:translateX(-50%) scale(1);box-shadow:inset 0 0 10px rgba(90,42,16,.6),0 0 0 1px #2e3433,0 0 0 rgba(141,255,60,0)}' +
+          '25%{transform:translateX(-50%) scale(1.35);box-shadow:inset 0 0 10px rgba(90,42,16,.6),0 0 0 1px #2e3433,0 0 26px rgba(141,255,60,.95)}' +
+          '100%{transform:translateX(-50%) scale(1);box-shadow:inset 0 0 10px rgba(90,42,16,.6),0 0 0 1px #2e3433,0 0 12px rgba(141,255,60,.18)}}',
+        '@media (max-width:760px){#stage-hud.bossup{top:12px}}',
+        '@media (max-width:480px){#stage-hud,#stage-hud.bossup{top:8px;padding:2px 8px 3px;gap:4px}#stage-hud .sg-k{font-size:.56rem;letter-spacing:.14em}#stage-hud .sg-n{font-size:.95rem}}'
+      ].join('\n');
+      (document.head || document.body).appendChild(st);
+    }
+    stageEl = document.createElement('div');
+    stageEl.id = 'stage-hud';
+    stageEl.hidden = true;
+    stageEl.innerHTML = '<span class="sg-k">STAGE</span><span class="sg-n">1</span>';
+    hud.appendChild(stageEl);
+    stageNumEl = stageEl.querySelector('.sg-n');
+    if (stageEl.addEventListener) stageEl.addEventListener('animationend', function () { if (stageEl.classList) stageEl.classList.remove('pulse'); });
+    return true;
+  }
+
+  // b: 현재 보스 (없으면 null). Game.running 이 false 면 숨김
+  function stageHudSync(b) {
+    if (!ensureStageHud()) return;
+    var show = Game.running !== false;
+    if (show !== stageHudState.shown) { stageHudState.shown = show; stageEl.hidden = !show; }
+    if (!show) return;
+    if (stageHudState.n !== stage) {
+      stageHudState.n = stage;
+      stageNumEl.textContent = String(stage);
+    }
+    var bu = !!b;
+    if (bu !== stageHudState.boss) {
+      stageHudState.boss = bu;
+      if (stageEl.classList) stageEl.classList.toggle('bossup', bu);
+    }
+    if (stageHudState.pulse) {
+      stageHudState.pulse = false;
+      if (stageEl.classList) {
+        stageEl.classList.remove('pulse');
+        void stageEl.offsetWidth;     // 애니메이션 다시 시작
+        stageEl.classList.add('pulse');
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- 발판 봉쇄 (모든 클라이언트)
   // 보스가 살아 있는 동안 (등장 연출 포함) Game.world.platformsLocked = true.
   // 물리(한 방향 발판 무시)는 world.js 가 담당, 여기선 플래그 + 시각효과 + 알림.
@@ -2053,8 +2368,13 @@
       bossFx = [];
       warnT = 0;
       toastQ = [];
+      stage = 1;
+      Mutants.stage = 1;
+      stageHudState.n = -1;
+      stageHudState.pulse = false;
       setLock(false, true);
       bossHudSync(null);
+      stageHudSync(null);
     },
 
     update: function (dt) {
@@ -2063,7 +2383,7 @@
       clock += dt;
       registerHandlers();
       pumpToasts();
-      if (Game.running === false) { bossHudSync(null); setLock(false, true); return; }
+      if (Game.running === false) { bossHudSync(null); stageHudSync(null); setLock(false, true); return; }
       var auth = isAuthority();
       var i, m;
 
@@ -2072,7 +2392,7 @@
         if (!Game.matchOver) {
           spawnTimer -= dt;
           if (spawnTimer <= 0) {
-            spawnTimer = rand(10, 14);
+            spawnTimer = rand(10, 14) * stageSpawnMul();
             // 보스 생존 중엔 일반 출현 쉼 (보스가 쥐/까마귀를 부름). 보스전 모드는 일반 출현 없음
             if (!findBoss() && !bossMode) spawnWave();
           }
@@ -2094,11 +2414,14 @@
           if (!tickStatus(m, dt)) {
             var adt = m.slowT > 0 ? dt * (m.boss ? 0.65 : 0.45) : dt;
             if (m.boss) updateBoss(m, adt);
-            else if (m.type === 'crow') updateCrow(m, adt); else updateGround(m, adt);
+            else if (m.type === 'crow') updateCrow(m, adt);
+            else if (m.type === 'mole') updateMole(m, adt);
+            else updateGround(m, adt);
           }
         } else {
           updateGuestMutant(m, dt);
         }
+        if (m.type === 'mole') moleFx(m, dt);
         if (m.type === 'centipede') centTrail(m);
         if (m.boss) checkBossContact(m, dt); else checkAttack(m);
       }
@@ -2108,6 +2431,7 @@
       if (lockAnim < 1 && curBoss) lockAnim = Math.min(1, lockAnim + dt * 2.5);
       else if (!curBoss && lockAnim > 0) lockAnim = Math.max(0, lockAnim - dt * 1.6);
       bossHudSync(curBoss);
+      stageHudSync(curBoss);
 
       if (auth) {
         // 죽은 개체 제거
@@ -2123,7 +2447,7 @@
 
     // src = {skill, castId} (처치 크레딧/미션용, 선택)
     hit: function (m, dmg, kx, ky, src) {
-      if (!m || !m.alive) return;
+      if (!m || !m.alive || m.under) return;   // 땅속 두더지는 무적
       kx = kx || 0; ky = ky || 0;
       if (!isAuthority()) {
         m.hitFlash = 0.15;
@@ -2138,7 +2462,8 @@
     status: function (m, kind, secs) {
       if (!m || !m.alive || !isAuthority()) return;
       secs = +secs || 0;
-      if (m.boss) secs *= BOSS.resist;     // 보스는 상태이상 저항 (지속시간 절반)
+      if (m.under && kind !== 'stun') return;   // 땅속 두더지: 기절만 통함 (지상으로 튀어나옴)
+      if (m.boss) secs *= BOSS.resist;    // 보스는 상태이상 저항 (지속시간 절반)
       if (kind === 'slow') m.slowT = Math.max(m.slowT || 0, secs);
       else if (kind === 'root') m.rootT = Math.max(m.rootT || 0, secs);
       else if (kind === 'stun') m.stunT = Math.max(m.stunT || 0, secs);
@@ -2180,7 +2505,7 @@
         ctx.save();
         try { drawMutant(ctx, m); } catch (e) { /* 렌더 오류가 루프를 멈추지 않게 */ }
         ctx.restore();
-        drawHpBar(ctx, m);
+        if (!(m.type === 'mole' && moleHidden(m))) drawHpBar(ctx, m);
       }
       ctx.save();
       try { renderBossOver(ctx); } catch (e2) { /* 무시 */ }
@@ -2195,6 +2520,11 @@
     bossOrder: BOSS_ORDER,
     bossMode: false,
     bossesKilled: 0,
+    // 현재 스테이지 (1부터, 보스 처치마다 +1). 변경 시 Game.events 'stageChanged' {stage}
+    stage: 1,
+    getStage: function () { return stage; },
+    moleInfo: MOLE,
+    stageInfo: STAGE,
     // 다음 보스까지 남은 시간 (권한측; 보스 생존 중엔 null)
     nextBossIn: function () { return findBoss() ? null : Math.max(0, bossTimer); },
     nextBossType: function () { return nextBossType(); },
@@ -2217,6 +2547,7 @@
         return b ? b.state : null;
       },
       getBossesKilled: function () { return bossesKilled; },
+      setStage: function (n) { setStage(n, true); },
       setBossMode: function (on) { bossMode = !!on; Mutants.bossMode = bossMode; },
       bossFx: function () { return bossFx; },
       onBossFx: function (msg) { onBossFxMsg(msg); },
@@ -2295,8 +2626,15 @@
   }
 
   function drawMutant(ctx, m) {
+    if (m.type === 'mole') {
+      if (moleHidden(m)) { drawMoleUnder(ctx, m); return; }
+      // 땅 아래로 내려간 부분은 잘라냄 (파고들기/솟구치기 시작)
+      var G0c = gy();
+      ctx.beginPath(); ctx.rect(m.x - 120, G0c - 600, m.w + 240, 600); ctx.clip();
+    }
     var cx = m.x + m.w / 2;
     var base = m.y + m.h;
+    if (m.type === 'mole' && m.state === 'burrow') base += m.h * 0.9 * clamp(1 - m.stateTimer / MOLE.burrow, 0, 1);
     var wind = m.state === 'windup';
     var intensity = wind ? 0.7 + 0.3 * Math.sin(clock * 40) : (m.state === 'attack' ? 0.6 : 0.15);
     var sx = 0, sy = 0;
@@ -2314,6 +2652,7 @@
     if (m.type === 'rat') drawRat(ctx, m, wind, intensity);
     else if (m.type === 'dog') drawDog(ctx, m, wind, intensity);
     else if (m.type === 'drone') drawDrone(ctx, m, wind, intensity);
+    else if (m.type === 'mole') drawMole(ctx, m, wind, intensity);
     else drawCrow(ctx, m, wind, intensity);
 
     if (m.hitFlash > 0) {
@@ -2487,6 +2826,209 @@
         ctx.beginPath(); ctx.moveTo(-34 - q * 8, by - 8 + q * 7); ctx.lineTo(-54 - q * 10, by - 8 + q * 7); ctx.stroke();
       }
     }
+  }
+
+  // ---- 변이 두더지
+  function moleHidden(m) { return !!m.under || m.state === 'under' || m.state === 'windup'; }
+
+  // 균열 한 줄 (지면을 따라 지그재그)
+  function moleCrackPath(ctx, x0, G0, dir, len, k, id) {
+    ctx.beginPath();
+    ctx.moveTo(x0, G0 - 1);
+    for (var j = 1; j <= 4; j++) {
+      var xx = x0 + dir * len * (j / 4) * (k ? 0.7 : 1);
+      var yy = G0 - 1 + (((j + k + id) % 2) ? 2.5 : -1.5) * (k ? 1 : -0.7);
+      ctx.lineTo(xx, yy);
+    }
+  }
+
+  // 땅속: 흙 둔덕 + 이동 흔적만 (월드 좌표). 예고 중엔 균열 + 자갈 + 경고
+  function drawMoleUnder(ctx, m) {
+    var G0 = gy(), cx = m.x + m.w / 2;
+    var wind = m.state === 'windup';
+    var i, k;
+    var tr = m.trail || [];
+    for (i = 0; i < tr.length; i++) {
+      var a = 1 - clamp((clock - tr[i].t) / 0.9, 0, 1);
+      if (a <= 0) continue;
+      ctx.fillStyle = 'rgba(92,74,52,' + (0.75 * a).toFixed(3) + ')';
+      ctx.beginPath(); ctx.ellipse(tr[i].x, G0, 13 * (0.6 + 0.4 * a), 5 * a + 1, 0, Math.PI, 0); ctx.fill();
+    }
+    var p = wind ? clamp(1 - m.stateTimer / MOLE.windup, 0, 1) : 0;
+    var sx = wind ? Math.sin(clock * 80 + m.id) * (1.5 + 2.5 * p) : 0;
+    var mx = cx + sx;
+    var hgt = 9 + 7 * p + (wind ? 0 : Math.abs(Math.sin(clock * 14 + m.id)) * 2);
+    var rw = 24 + 10 * p;
+    if (wind) {
+      // 바닥 경고 빛
+      var gr = 60 + 20 * p;
+      var gl = ctx.createRadialGradient(cx, G0, 2, cx, G0, gr);
+      gl.addColorStop(0, 'rgba(141,255,60,' + (0.1 + 0.35 * p).toFixed(3) + ')');
+      gl.addColorStop(1, 'rgba(141,255,60,0)');
+      ctx.fillStyle = gl;
+      ctx.beginPath(); ctx.ellipse(cx, G0, gr, 18 + 10 * p, 0, Math.PI, 0); ctx.fill();
+    }
+    // 둔덕
+    var g = ctx.createLinearGradient(0, G0 - hgt, 0, G0);
+    g.addColorStop(0, '#7a644a'); g.addColorStop(1, '#3e3226');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(mx, G0, rw, hgt, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = 'rgba(176,92,38,0.55)';
+    ctx.beginPath(); ctx.ellipse(mx - rw * 0.3, G0 - hgt * 0.45, 4, 2, 0.3, 0, Math.PI * 2); ctx.fill();
+    // 자갈 알갱이
+    ctx.fillStyle = '#a89470';
+    for (k = 0; k < 5; k++) {
+      var px = mx + (((m.id * 37 + k * 53) % 100) / 100 - 0.5) * rw * 1.3;
+      var py = G0 - hgt * 0.25 - (((k * 29 + m.id * 11) % 10) / 10) * hgt * 0.5;
+      ctx.fillRect(px, py, 2.5, 2);
+    }
+    // 흙 틈 사이로 보이는 독성 눈빛
+    var glow = wind ? 0.5 + 0.5 * p : 0.25 + 0.15 * Math.sin(clock * 5 + m.id);
+    ctx.save();
+    ctx.shadowColor = TOXIC; ctx.shadowBlur = 6 + 14 * glow;
+    ctx.fillStyle = 'rgba(141,255,60,' + (0.5 + 0.5 * glow).toFixed(3) + ')';
+    ctx.fillRect(mx + m.facing * 6 - 1.5, G0 - hgt * 0.55, 3, 1.6);
+    ctx.fillRect(mx + m.facing * 11 - 1.2, G0 - hgt * 0.5, 2.4, 1.4);
+    ctx.restore();
+    if (wind) {
+      // 균열 (점점 길어짐) — 어두운 틈 + 독성 빛
+      var len = 18 + 46 * p;
+      ctx.lineCap = 'round';
+      for (var s = -1; s <= 1; s += 2) {
+        for (k = 0; k < 2; k++) {
+          moleCrackPath(ctx, cx + s * rw * 0.6, G0, s, len, k, m.id);
+          ctx.strokeStyle = '#1a1410'; ctx.lineWidth = 2.6; ctx.stroke();
+          ctx.strokeStyle = 'rgba(141,255,60,' + (0.25 + 0.55 * p).toFixed(3) + ')'; ctx.lineWidth = 1; ctx.stroke();
+        }
+      }
+      // 튀는 자갈 (그림)
+      ctx.fillStyle = '#b8a47e';
+      for (k = 0; k < 4; k++) {
+        var ph = (clock * 3.2 + k * 0.27 + m.seed) % 1;
+        var bx = cx + (k - 1.5) * 14 + Math.sin(k * 7.1 + m.id) * 6;
+        ctx.fillRect(bx, G0 - 4 - Math.sin(ph * Math.PI) * (10 + 16 * p), 3, 2.5);
+      }
+      // 경고 표시
+      ctx.globalAlpha = Math.sin(clock * 20) > 0 ? 1 : 0.4;
+      ctx.fillStyle = '#ff7a3a';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('!', cx, G0 - hgt - 10);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // 굴착 앞발 (원점: 어깨)
+  function moleClaw(ctx, x, y, ang, near) {
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(ang);
+    ctx.fillStyle = near ? '#4e3f36' : '#3a2f28';
+    ctx.beginPath(); ctx.ellipse(5, 2, 8, 5, 0.3, 0, Math.PI * 2); ctx.fill();
+    // 넓은 손바닥 (굳은살 + 녹)
+    ctx.fillStyle = near ? '#9a6a62' : '#7a524c';
+    ctx.beginPath(); ctx.ellipse(12, 5, 6, 7.5, 0.2, 0, Math.PI * 2); ctx.fill();
+    if (near) rust(ctx, 11, 7, 2.5, 2);
+    // 발톱 4개 (녹슨 강철빛)
+    for (var k = 0; k < 4; k++) {
+      var yb = -1 + k * 3.4;
+      ctx.fillStyle = k % 2 ? '#cfc6a8' : '#b0a584';
+      ctx.beginPath();
+      ctx.moveTo(15, yb); ctx.lineTo(16, yb + 3);
+      ctx.lineTo(26 + (k === 1 || k === 2 ? 2 : 0), yb + 3.5 + k * 0.6);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(141,255,60,0.6)';
+    ctx.beginPath(); ctx.arc(27.5, 7.5, 1.1, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  // 지상의 두더지 (원점: 발밑 중앙, +x = 앞)
+  function drawMole(ctx, m, wind, intensity) {
+    var st = m.state;
+    var t = m.animT * 2;
+    var erupt = st === 'attack', bite = st === 'bite', dig = st === 'burrow';
+    if (erupt || bite) intensity = Math.max(intensity, 0.75);
+    var by = -17 - (erupt ? 0 : Math.abs(Math.sin(t)) * 1.5);
+    ctx.save();
+    if (erupt) { ctx.translate(0, by); ctx.rotate(-0.5); ctx.translate(0, -by); }
+    else if (dig) { ctx.translate(0, by); ctx.rotate(0.38); ctx.translate(0, -by); }
+    var i;
+    // 뒷발 (짧음)
+    leg(ctx, -16, by + 9, 9, t + Math.PI, 4, '#2e2520');
+    leg(ctx, -6, by + 10, 9, t, 4, '#2e2520');
+    // 짧은 꼬리
+    ctx.strokeStyle = '#a07070'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-25, by + 2);
+    ctx.quadraticCurveTo(-32, by - 3 + Math.sin(clock * 7 + m.id) * 2, -36, by + 3); ctx.stroke();
+    // 몸통 (통통한 원통)
+    var g = ctx.createRadialGradient(-4, by - 8, 3, 0, by, 30);
+    g.addColorStop(0, '#5b4f47'); g.addColorStop(1, '#241d19');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(0, by, 26, 15, 0, 0, Math.PI * 2); ctx.fill();
+    // 배 쪽 털결
+    ctx.strokeStyle = 'rgba(20,14,10,0.7)'; ctx.lineWidth = 1;
+    for (i = -18; i <= 14; i += 5) { ctx.beginPath(); ctx.moveTo(i, by + 9); ctx.lineTo(i - 2, by + 13); ctx.stroke(); }
+    // 등에 박힌 녹슨 고철 갑피 + 리벳
+    for (i = 0; i < 3; i++) {
+      var px = -13 + i * 10, py = by - 11 + Math.abs(i - 1) * 1.6;
+      ctx.fillStyle = i === 1 ? '#7a5234' : '#6a4630';
+      ctx.beginPath(); ctx.ellipse(px, py, 6.5, 4, -0.25 + i * 0.25, Math.PI, 0); ctx.fill();
+      ctx.strokeStyle = '#3a2414'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = '#c9a27a';
+      ctx.beginPath(); ctx.arc(px, py - 2, 0.9, 0, Math.PI * 2); ctx.fill();
+    }
+    rust(ctx, -10, by - 2, 6, 4);
+    rust(ctx, 9, by + 4, 4, 3);
+    moss(ctx, -4, by - 14, 3.6, m.seed);
+    moss(ctx, -19, by - 8, 2.6, m.seed + 0.5);
+    tumor(ctx, -15 + m.seed * 6, by - 12, 4 + m.seed * 2);
+    // 머리 + 긴 주둥이
+    var hx = 22 + (bite ? 5 : 0), hy = by + 2 + (bite ? 2 : 0);
+    ctx.fillStyle = '#4a3d35';
+    ctx.beginPath(); ctx.ellipse(hx, hy, 10, 8, 0.1, 0, Math.PI * 2); ctx.fill();
+    // 벌어지는 턱
+    var jaw = bite ? 0.55 : (erupt ? 0.35 : 0.08 + Math.sin(clock * 4 + m.id) * 0.04);
+    ctx.save();
+    ctx.translate(hx + 3, hy + 4); ctx.rotate(jaw);
+    ctx.fillStyle = '#33261d';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(13, 0); ctx.lineTo(11, 4); ctx.lineTo(0, 4); ctx.fill();
+    ctx.fillStyle = '#e6dcb8';
+    for (i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(3 + i * 3.5, 0); ctx.lineTo(4.5 + i * 3.5, -2.5); ctx.lineTo(6 + i * 3.5, 0); ctx.fill(); }
+    ctx.restore();
+    ctx.fillStyle = '#5a4038';
+    ctx.beginPath(); ctx.moveTo(hx + 3, hy - 5); ctx.quadraticCurveTo(hx + 16, hy - 4, hx + 20, hy); ctx.quadraticCurveTo(hx + 14, hy + 4, hx + 3, hy + 4); ctx.fill();
+    // 앞니
+    ctx.fillStyle = '#e8dcb0';
+    ctx.fillRect(hx + 13, hy + 2, 2, 4); ctx.fillRect(hx + 16, hy + 1.5, 2, 3.5);
+    // 별 모양 변이 코 (분홍 촉수 + 독성 끝)
+    var ncx = hx + 21, ncy = hy;
+    for (i = 0; i < 8; i++) {
+      var a = i / 8 * Math.PI * 2 + Math.sin(clock * 9 + i) * 0.12;
+      var rr = 4 + Math.sin(clock * 11 + i * 1.3) * 0.6;
+      ctx.fillStyle = i % 2 ? '#d97a8a' : '#c46478';
+      ctx.beginPath(); ctx.ellipse(ncx + Math.cos(a) * rr, ncy + Math.sin(a) * rr, 2.2, 1.3, a, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = '#9a4058';
+    ctx.beginPath(); ctx.arc(ncx, ncy, 2.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(141,255,60,' + (0.4 + intensity * 0.5).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(ncx + 0.5, ncy - 0.5, 1, 0, Math.PI * 2); ctx.fill();
+    // 작은 실눈 (빛나는)
+    if (wind || erupt || bite) eyeHalo(ctx, hx + 2, hy - 4, 14);
+    glowEye(ctx, hx + 3, hy - 4, 1.9, intensity);
+    glowEye(ctx, hx - 2, hy - 3, 1.4, intensity);
+    // 큰 앞발 (먼 쪽, 가까운 쪽)
+    var pawA = erupt ? -1.25 : (dig ? 0.5 + Math.sin(clock * 30) * 0.7 : (bite ? -0.35 : 0.35 + Math.sin(t) * 0.18));
+    moleClaw(ctx, 8, by + 4, pawA + (dig ? 0.9 : 0.15), false);
+    moleClaw(ctx, 13, by + 7, pawA, true);
+    // 솟구칠 때 흙덩이
+    if (erupt) {
+      for (i = 0; i < 6; i++) {
+        var dx = Math.sin(i * 2.3 + m.id) * 26, dy = 6 + ((clock * 90 + i * 13) % 26);
+        ctx.fillStyle = i % 2 ? '#7a644a' : '#5a4a36';
+        ctx.fillRect(dx - 2, -dy * 0.3 + 4, 4, 3.5);
+      }
+    }
+    ctx.restore();
   }
 
   // ---- 변이 까마귀 (원점: 몸 아래 중앙)

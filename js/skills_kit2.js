@@ -33,7 +33,7 @@
   function worldW() { return (G.world && G.world.width) || 4200; }
   function localP() { return (G.players && G.players.local) || null; }
   function isAlive(e) { return !!e && e.alive !== false; }
-  function mutList() { return (G.Mutants && G.Mutants.list) || []; }
+  function mutList() { return ((G.Mutants && G.Mutants.list) || []).filter(function (q) { return !(q && q.under); }); }
   function isAuth() {
     if (typeof S.isAuthority === 'function') { return !!S.isAuthority(); }
     return !!((G.Net && G.Net.isHost) || G.mode === 'practice');
