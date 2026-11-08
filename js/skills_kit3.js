@@ -774,8 +774,10 @@
   }
   timeDef({
     id: 'time_hands', name: '초침 베기', icon: '🕰️', cost: 38, cooldown: 4.5,
-    desc: '거대한 시곗바늘이 주위를 한 바퀴 휩쓸어 베고, 맞은 적을 1.5초간 느리게 합니다.',
+    desc: '거대한 시곗바늘이 주위를 한 바퀴 휩쓸어 베고, 맞은 적을 1.5초간 느리게 합니다. 시간 정지 중에는 쿨타임·에너지 없이 계속 연달아 벨 수 있습니다.',
     prepare: function (c) {
+      // 시간 정지 중: 시전 경직 없음 → 지속시간 동안 계속 연타 가능
+      if (typeof S.timeStopFree === 'function' && S.timeStopFree(c.casterId, 'time_hands')) return {};
       c.p.frozen = Math.max(c.p.frozen || 0, HD_WIND + HD_SWEEP); c.p.vx = 0;
       return {};
     },

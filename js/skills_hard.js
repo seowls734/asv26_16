@@ -665,7 +665,7 @@
   S.register({
     id: 'timestop', element: 'time', elementName: '시간', name: '시간 정지', icon: '⏳',
     rarity: 'hard', cost: 80, cooldown: 20, color: TS_COL,
-    desc: '5초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다. 시간이 다시 흐르는 순간 대폭발이 일어나 주변의 적이 모두 터집니다.',
+    desc: '5초 동안 시간을 멈춥니다. 모든 돌연변이와 상대가 얼어붙고, 나만 움직입니다. 시간이 다시 흐르는 순간 대폭발이 일어나 주변의 적이 모두 터집니다. 정지 중에는 초침 베기를 무제한으로 쓸 수 있습니다.',
     cast: function (ctx) {
       var p = ctx.p;
       var cx = p ? ctx.x + p.w / 2 : ctx.x, cy = p ? ctx.y + p.h / 2 : ctx.y;
